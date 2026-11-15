@@ -43,6 +43,12 @@ jobs:
         with:
           gradle-version: '9.3.1'
 
+      - name: Cache generated debug keystore
+        uses: actions/cache@v4
+        with:
+          path: debug.keystore
+          key: priyo-nots-debug-keystore-v1
+
       - name: Restore or generate debug keystore
         run: |
           if [ -f debug.keystore.base64 ]; then
@@ -58,6 +64,7 @@ jobs:
               -validity 10000 \
               -dname "CN=Android Debug,O=Android,C=US"
           fi
+          keytool -list -v -keystore debug.keystore -storepass android | grep -E "SHA1:|SHA256:" || true
 
       - name: Run unit tests
         run: gradle :app:testDebugUnitTest
