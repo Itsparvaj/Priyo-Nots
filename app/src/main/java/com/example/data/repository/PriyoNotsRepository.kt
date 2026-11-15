@@ -7,6 +7,11 @@ import com.example.data.backup.BackupManager
 import com.example.data.backup.BackupResult
 import com.example.data.backup.RestoreMode
 import com.example.data.backup.RestoreSummary
+import com.example.data.github.GitHubCloudBackupResult
+import com.example.data.github.GitHubGistSummary
+import com.example.data.github.GitHubService
+import com.example.data.github.GitHubUser
+import com.example.data.github.SecureTokenStore
 import com.example.data.local.PriyoNotsDatabase
 import com.example.data.local.dao.ReminderWithNoteTitle
 import com.example.data.local.entity.AppSettingsEntity
@@ -36,6 +41,7 @@ class PriyoNotsRepository(
 
     private val backupManager = BackupManager(context, database)
     private val updateChecker = UpdateChecker(context)
+    private val tokenStore = SecureTokenStore(context)
 
     val activeNotes: Flow<List<NoteWithRelations>> = notesDao.observeActiveNotes()
     val pinnedNotes: Flow<List<NoteWithRelations>> = notesDao.observePinnedNotes()
@@ -261,6 +267,140 @@ class PriyoNotsRepository(
 
     suspend fun checkForUpdate(endpointUrl: String): Result<UpdateMetadata?> =
         updateChecker.checkForUpdate(endpointUrl)
+
+    suspend fun checkForGitHubReleaseUpdate(repoInput: String): Result<UpdateMetadata?> =
+        GitHubService.fetchLatestRelease(repoInput, tokenStore.getToken())
+
+    fun hasGitHubToken(): Boolean = tokenStore.hasToken()
+
+    suspend fun connectGitHubToken(token: String): Result<GitHubUser> {
+        val result = GitHubService.verifyToken(token)
+        result.onSuccess { user ->
+            tokenStore.saveToken(token)
+            updateSettings {
+                it.copy(
+                    githubUsername = user.login,
+                    githubLastStatus = "Connected as @${user.login}"
+                )
+            }
+        }
+        return result
+    }
+
+    suspend fun disconnectGitHub() {
+        tokenStore.clearToken()
+        updateSettings {
+            it.copy(
+                githubUsername = "",
+                githubLastStatus = "Not connected"
+            )
+        }
+    }
+
+    suspend fun backupToGitHubGist(password: String?): Result<GitHubCloudBackupResult> {
+        val token = tokenStore.getToken()
+            ?: return Result.failure(IllegalStateException("Connect your GitHub token first."))
+        val settings = getSettings()
+        val (payload, counts) = backupManager.createBackupPayload(password)
+        val isEncrypted = !password.isNullOrBlank()
+        val fileName = if (isEncrypted) "priyo_nots_backup.pnbak" else "priyo_nots_backup.json"
+
+        val res = GitHubService.uploadBackupToGist(
+            token = token,
+            existingGistId = settings.githubGistId,
+            fileName = fileName,
+            content = payload,
+            noteCount = counts.first
+        )
+        res.onSuccess { cloud ->
+            val now = System.currentTimeMillis()
+            updateSettings {
+                it.copy(
+                    githubGistId = cloud.targetId,
+                    githubLastBackupAt = now,
+                    githubLastStatus = "Gist synced (${counts.first} notes)"
+                )
+            }
+            backupManager.recordExternalBackupSuccess(
+                fileName = cloud.fileName,
+                fileUri = cloud.url,
+                sizeBytes = cloud.sizeBytes,
+                counts = counts,
+                isEncrypted = isEncrypted,
+                backupType = BackupHistoryEntity.TYPE_GITHUB_GIST,
+                locationLabel = "GitHub Secret Gist (${cloud.targetId.take(8)}…)"
+            )
+        }
+        return res
+    }
+
+    suspend fun backupToGitHubRepo(
+        repoInput: String,
+        branch: String,
+        filePath: String,
+        password: String?
+    ): Result<GitHubCloudBackupResult> {
+        val token = tokenStore.getToken()
+            ?: return Result.failure(IllegalStateException("Connect your GitHub token first."))
+        val (payload, counts) = backupManager.createBackupPayload(password)
+        val isEncrypted = !password.isNullOrBlank()
+
+        val res = GitHubService.uploadBackupToRepo(
+            token = token,
+            repoInput = repoInput,
+            branch = branch,
+            filePath = filePath,
+            content = payload
+        )
+        res.onSuccess { cloud ->
+            val now = System.currentTimeMillis()
+            val normalizedSlug = GitHubService.normalizeRepoSlug(repoInput) ?: repoInput
+            updateSettings {
+                it.copy(
+                    githubRepoSlug = normalizedSlug,
+                    githubRepoBranch = branch.ifBlank { "main" },
+                    githubRepoFilePath = filePath,
+                    githubLastBackupAt = now,
+                    githubLastStatus = "Repo synced ($normalizedSlug)"
+                )
+            }
+            backupManager.recordExternalBackupSuccess(
+                fileName = cloud.fileName,
+                fileUri = cloud.url,
+                sizeBytes = cloud.sizeBytes,
+                counts = counts,
+                isEncrypted = isEncrypted,
+                backupType = BackupHistoryEntity.TYPE_GITHUB_REPO,
+                locationLabel = "GitHub Repo ($normalizedSlug)"
+            )
+        }
+        return res
+    }
+
+    suspend fun listGitHubGists(): Result<List<GitHubGistSummary>> {
+        val token = tokenStore.getToken()
+            ?: return Result.failure(IllegalStateException("Connect your GitHub token first."))
+        return GitHubService.listPriyoNotsGists(token)
+    }
+
+    suspend fun fetchGitHubGistRaw(gistId: String): Result<String> {
+        val token = tokenStore.getToken()
+            ?: return Result.failure(IllegalStateException("Connect your GitHub token first."))
+        return GitHubService.fetchGistContent(token, gistId)
+    }
+
+    suspend fun fetchGitHubRepoRaw(repoInput: String, branch: String, filePath: String): Result<String> {
+        val token = tokenStore.getToken()
+            ?: return Result.failure(IllegalStateException("Connect your GitHub token first."))
+        return GitHubService.fetchRepoFileContent(token, repoInput, branch, filePath)
+    }
+
+    suspend fun restoreFromRawBackupText(
+        rawText: String,
+        mode: RestoreMode,
+        password: String?,
+        onProgress: (Float, String) -> Unit
+    ): RestoreSummary = backupManager.restoreFromRawText(rawText, mode, password, onProgress)
 
     fun downloadUpdateApk(metadata: UpdateMetadata): Flow<DownloadState> =
         updateChecker.downloadAndVerifyApk(metadata)

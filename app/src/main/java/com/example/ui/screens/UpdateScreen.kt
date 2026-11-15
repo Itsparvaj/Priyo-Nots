@@ -1,5 +1,7 @@
 package com.example.ui.screens
 
+import android.content.Intent
+import android.net.Uri
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
@@ -8,7 +10,6 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.safeDrawing
 import androidx.compose.foundation.layout.width
@@ -16,6 +17,7 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.automirrored.outlined.OpenInNew
 import androidx.compose.material.icons.outlined.CheckCircle
 import androidx.compose.material.icons.outlined.Download
 import androidx.compose.material.icons.outlined.Refresh
@@ -25,6 +27,7 @@ import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.FilterChip
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.LinearProgressIndicator
@@ -35,7 +38,6 @@ import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -48,6 +50,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.example.BuildConfig
+import com.example.data.local.entity.AppSettingsEntity
 import com.example.data.update.DownloadState
 import com.example.ui.components.formatFileSize
 import com.example.ui.components.formatTimestamp
@@ -65,15 +68,13 @@ fun UpdateScreen(
     val updateState by viewModel.updateState.collectAsStateWithLifecycle()
     val downloadState by viewModel.downloadState.collectAsStateWithLifecycle()
 
+    var githubRepoInput by remember(settings.githubReleaseRepo) {
+        mutableStateOf(settings.githubReleaseRepo)
+    }
     var endpointInput by remember(settings.updateEndpointUrl) {
         mutableStateOf(settings.updateEndpointUrl)
     }
-
-    LaunchedEffect(settings.updateEndpointUrl) {
-        if (endpointInput.isBlank() && settings.updateEndpointUrl.isNotBlank()) {
-            endpointInput = settings.updateEndpointUrl
-        }
-    }
+    val useGitHub = settings.updateSourceType == AppSettingsEntity.UPDATE_SOURCE_GITHUB
 
     Scaffold(
         contentWindowInsets = WindowInsets.safeDrawing,
@@ -125,42 +126,105 @@ fun UpdateScreen(
                 border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant)
             ) {
                 Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                    Text("Configurable Update JSON Endpoint", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.SemiBold)
-                    Text(
-                        text = "Enter an HTTPS JSON endpoint returning versionCode, versionName, updateTitle, updateMessage, downloadUrl, releaseNotes, and forceUpdate.",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
-                    OutlinedTextField(
-                        value = endpointInput,
-                        onValueChange = { endpointInput = it },
-                        label = { Text("HTTPS Update JSON URL") },
-                        placeholder = { Text("https://your-domain.example/priyo-nots-update.json") },
-                        singleLine = true,
-                        modifier = Modifier.fillMaxWidth().testTag("update_url_input")
-                    )
-                    Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                        OutlinedButton(
+                    Text("Update Source", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.SemiBold)
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        FilterChip(
+                            selected = useGitHub,
                             onClick = {
-                                val cleaned = endpointInput.trim()
-                                viewModel.updateSettings { it.copy(updateEndpointUrl = cleaned) }
-                                viewModel.emitMessage("Update endpoint saved")
+                                viewModel.updateSettings {
+                                    it.copy(updateSourceType = AppSettingsEntity.UPDATE_SOURCE_GITHUB)
+                                }
                             },
-                            modifier = Modifier.weight(1f)
-                        ) {
-                            Text("Save URL")
+                            label = { Text("GitHub Releases") },
+                            modifier = Modifier.testTag("update_source_github")
+                        )
+                        FilterChip(
+                            selected = !useGitHub,
+                            onClick = {
+                                viewModel.updateSettings {
+                                    it.copy(updateSourceType = AppSettingsEntity.UPDATE_SOURCE_CUSTOM_JSON)
+                                }
+                            },
+                            label = { Text("Custom HTTPS JSON") },
+                            modifier = Modifier.testTag("update_source_json")
+                        )
+                    }
+
+                    if (useGitHub) {
+                        Text(
+                            text = "Checks latest GitHub Release tag and downloads attached .apk asset directly.",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                        OutlinedTextField(
+                            value = githubRepoInput,
+                            onValueChange = { githubRepoInput = it },
+                            label = { Text("GitHub Repository (owner/repo)") },
+                            placeholder = { Text("mohammadparvaj/priyo-nots") },
+                            singleLine = true,
+                            modifier = Modifier.fillMaxWidth().testTag("github_release_repo_input")
+                        )
+                        Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                            OutlinedButton(
+                                onClick = {
+                                    val cleaned = githubRepoInput.trim()
+                                    viewModel.updateSettings { it.copy(githubReleaseRepo = cleaned) }
+                                    viewModel.emitMessage("GitHub release repository saved")
+                                },
+                                modifier = Modifier.weight(1f)
+                            ) {
+                                Text("Save Repo")
+                            }
+                            Button(
+                                onClick = {
+                                    val cleaned = githubRepoInput.trim()
+                                    viewModel.updateSettings { it.copy(githubReleaseRepo = cleaned) }
+                                    viewModel.checkForUpdates(isAutomaticStartup = false)
+                                },
+                                modifier = Modifier.weight(1f).testTag("check_updates_button")
+                            ) {
+                                Icon(Icons.Outlined.Refresh, contentDescription = null)
+                                Spacer(modifier = Modifier.width(6.dp))
+                                Text("Check Releases")
+                            }
                         }
-                        Button(
-                            onClick = {
-                                val cleaned = endpointInput.trim()
-                                viewModel.updateSettings { it.copy(updateEndpointUrl = cleaned) }
-                                viewModel.checkForUpdates(isAutomaticStartup = false)
-                            },
-                            modifier = Modifier.weight(1f).testTag("check_updates_button")
-                        ) {
-                            Icon(Icons.Outlined.Refresh, contentDescription = null)
-                            Spacer(modifier = Modifier.width(6.dp))
-                            Text("Check Now")
+                    } else {
+                        Text(
+                            text = "Enter an HTTPS JSON endpoint returning versionCode, versionName, updateTitle, updateMessage, downloadUrl, releaseNotes, and forceUpdate.",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                        OutlinedTextField(
+                            value = endpointInput,
+                            onValueChange = { endpointInput = it },
+                            label = { Text("HTTPS Update JSON URL") },
+                            placeholder = { Text("https://your-domain.example/priyo-nots-update.json") },
+                            singleLine = true,
+                            modifier = Modifier.fillMaxWidth().testTag("update_url_input")
+                        )
+                        Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                            OutlinedButton(
+                                onClick = {
+                                    val cleaned = endpointInput.trim()
+                                    viewModel.updateSettings { it.copy(updateEndpointUrl = cleaned) }
+                                    viewModel.emitMessage("Update endpoint saved")
+                                },
+                                modifier = Modifier.weight(1f)
+                            ) {
+                                Text("Save URL")
+                            }
+                            Button(
+                                onClick = {
+                                    val cleaned = endpointInput.trim()
+                                    viewModel.updateSettings { it.copy(updateEndpointUrl = cleaned) }
+                                    viewModel.checkForUpdates(isAutomaticStartup = false)
+                                },
+                                modifier = Modifier.weight(1f).testTag("check_updates_button")
+                            ) {
+                                Icon(Icons.Outlined.Refresh, contentDescription = null)
+                                Spacer(modifier = Modifier.width(6.dp))
+                                Text("Check Now")
+                            }
                         }
                     }
                 }
@@ -214,7 +278,7 @@ fun UpdateScreen(
                         Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
                             Text(meta.updateTitle, style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
                             Text(
-                                text = "Current: v${BuildConfig.VERSION_NAME} (${BuildConfig.VERSION_CODE})  →  Latest: v${meta.versionName} (${meta.versionCode})",
+                                text = "Current: v${BuildConfig.VERSION_NAME} (${BuildConfig.VERSION_CODE})  →  Latest: v${meta.versionName}",
                                 style = MaterialTheme.typography.labelLarge,
                                 color = MaterialTheme.colorScheme.primary
                             )
@@ -227,14 +291,30 @@ fun UpdateScreen(
                             when (val dl = downloadState) {
                                 DownloadState.Idle -> {
                                     Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                                        Button(
-                                            onClick = { viewModel.startUpdateDownload(meta) },
-                                            enabled = meta.downloadUrl.isNotBlank(),
-                                            modifier = Modifier.weight(1f)
-                                        ) {
-                                            Icon(Icons.Outlined.Download, contentDescription = null)
-                                            Spacer(modifier = Modifier.width(6.dp))
-                                            Text("Update Now")
+                                        if (meta.hasDirectApkAsset) {
+                                            Button(
+                                                onClick = { viewModel.startUpdateDownload(meta) },
+                                                modifier = Modifier.weight(1f)
+                                            ) {
+                                                Icon(Icons.Outlined.Download, contentDescription = null)
+                                                Spacer(modifier = Modifier.width(6.dp))
+                                                Text("Update Now")
+                                            }
+                                        } else if (meta.downloadUrl.isNotBlank()) {
+                                            Button(
+                                                onClick = {
+                                                    runCatching {
+                                                        context.startActivity(
+                                                            Intent(Intent.ACTION_VIEW, Uri.parse(meta.downloadUrl))
+                                                        )
+                                                    }
+                                                },
+                                                modifier = Modifier.weight(1f)
+                                            ) {
+                                                Icon(Icons.AutoMirrored.Outlined.OpenInNew, contentDescription = null)
+                                                Spacer(modifier = Modifier.width(6.dp))
+                                                Text("View Release")
+                                            }
                                         }
                                         if (!meta.forceUpdate) {
                                             OutlinedButton(

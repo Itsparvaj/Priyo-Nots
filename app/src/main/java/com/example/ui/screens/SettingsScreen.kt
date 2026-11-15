@@ -152,7 +152,7 @@ fun SettingsScreen(
             SettingsNavRow(
                 icon = Icons.Outlined.Backup,
                 title = "Backup & Restore",
-                subtitle = settings.lastBackupStatus,
+                subtitle = "${settings.lastBackupStatus} · GitHub: ${settings.githubLastStatus}",
                 onClick = onOpenBackupRestore,
                 testTag = "settings_backup_row"
             )
@@ -187,7 +187,7 @@ fun SettingsScreen(
             SettingsSwitchRow(
                 icon = Icons.Outlined.SystemUpdate,
                 title = "Check Updates on Launch",
-                subtitle = "Checks your configured HTTPS JSON update endpoint",
+                subtitle = "Checks GitHub Releases or custom HTTPS JSON endpoint",
                 checked = settings.updateCheckEnabled,
                 onCheckedChange = { enabled ->
                     viewModel.updateSettings { it.copy(updateCheckEnabled = enabled) }
@@ -196,7 +196,11 @@ fun SettingsScreen(
             SettingsNavRow(
                 icon = Icons.Outlined.SystemUpdate,
                 title = "Check for Updates",
-                subtitle = if (settings.updateEndpointUrl.isBlank()) "Configure HTTPS update URL" else settings.updateEndpointUrl,
+                subtitle = if (settings.updateSourceType == AppSettingsEntity.UPDATE_SOURCE_GITHUB) {
+                    settings.githubReleaseRepo.ifBlank { "Configure GitHub Releases repository" }
+                } else {
+                    settings.updateEndpointUrl.ifBlank { "Configure HTTPS update URL" }
+                },
                 onClick = onOpenUpdateScreen,
                 testTag = "settings_updates_row"
             )

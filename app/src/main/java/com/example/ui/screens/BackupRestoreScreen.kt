@@ -21,16 +21,21 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.outlined.Backup
+import androidx.compose.material.icons.outlined.CloudDownload
+import androidx.compose.material.icons.outlined.CloudUpload
 import androidx.compose.material.icons.outlined.FolderOpen
 import androidx.compose.material.icons.outlined.History
 import androidx.compose.material.icons.outlined.Info
+import androidx.compose.material.icons.outlined.Key
 import androidx.compose.material.icons.outlined.Lock
 import androidx.compose.material.icons.outlined.Restore
 import androidx.compose.material.icons.outlined.SaveAlt
+import androidx.compose.foundation.clickable
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.HorizontalDivider
@@ -60,7 +65,9 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.example.data.backup.BackupCrypto
 import com.example.data.backup.RestoreMode
+import com.example.data.local.entity.AppSettingsEntity
 import com.example.ui.components.formatFileSize
 import com.example.ui.components.formatTimestamp
 import com.example.ui.viewmodel.BackupOperationState
@@ -81,15 +88,28 @@ fun BackupRestoreScreen(
     val scope = rememberCoroutineScope()
     val settings by viewModel.settings.collectAsStateWithLifecycle()
     val opState by viewModel.backupState.collectAsStateWithLifecycle()
+    val githubGists by viewModel.githubGists.collectAsStateWithLifecycle()
+    val githubBusy by viewModel.githubBusy.collectAsStateWithLifecycle()
 
     var encryptEnabled by remember { mutableStateOf(false) }
     var backupPassword by remember { mutableStateOf("") }
 
-    // Pending restore state
+    // Pending restore state (local Uri or cloud raw text)
     var pendingRestoreUri by remember { mutableStateOf<Uri?>(null) }
+    var pendingCloudRestoreText by remember { mutableStateOf<String?>(null) }
     var restoreRequiresPassword by remember { mutableStateOf(false) }
     var restorePassword by remember { mutableStateOf("") }
     var restoreMode by remember { mutableStateOf(RestoreMode.MERGE) }
+
+    // GitHub Cloud config state
+    var showGitHubTokenDialog by remember { mutableStateOf(false) }
+    var showGistPickerDialog by remember { mutableStateOf(false) }
+    var gitHubTokenInput by remember { mutableStateOf("") }
+    var repoSlugInput by remember(settings.githubRepoSlug) { mutableStateOf(settings.githubRepoSlug) }
+    var repoBranchInput by remember(settings.githubRepoBranch) { mutableStateOf(settings.githubRepoBranch) }
+    var repoPathInput by remember(settings.githubRepoFilePath) { mutableStateOf(settings.githubRepoFilePath) }
+    val isGitHubConnected = settings.githubUsername.isNotBlank() && viewModel.hasGitHubToken()
+    val isGistMode = settings.githubBackupMode != AppSettingsEntity.GITHUB_MODE_REPO
 
     val createBackupDocLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.CreateDocument("application/json")
@@ -427,12 +447,283 @@ fun BackupRestoreScreen(
                     }
                 }
             }
+
+            // GitHub Cloud Backup (Secret Gist & Repository) Card
+            Card(
+                shape = MaterialTheme.shapes.medium,
+                border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant)
+            ) {
+                Column(
+                    modifier = Modifier.padding(16.dp),
+                    verticalArrangement = Arrangement.spacedBy(10.dp)
+                ) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.weight(1f)) {
+                            Icon(Icons.Outlined.CloudUpload, contentDescription = null, tint = MaterialTheme.colorScheme.primary)
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Column {
+                                Text("GitHub Cloud Backup", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
+                                Text(
+                                    text = if (isGitHubConnected) "Connected as @${settings.githubUsername}" else "Not connected",
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = if (isGitHubConnected) MaterialTheme.colorScheme.tertiary else MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                            }
+                        }
+                        if (isGitHubConnected) {
+                            TextButton(onClick = { viewModel.disconnectGitHub() }) {
+                                Text("Disconnect", color = MaterialTheme.colorScheme.error)
+                            }
+                        } else {
+                            OutlinedButton(
+                                onClick = { showGitHubTokenDialog = true },
+                                modifier = Modifier.testTag("connect_github_button")
+                            ) {
+                                Icon(Icons.Outlined.Key, contentDescription = null)
+                                Spacer(modifier = Modifier.width(6.dp))
+                                Text("Connect")
+                            }
+                        }
+                    }
+
+                    Text(
+                        text = "Sync backups to a private GitHub Secret Gist or Repository. Enable AES-256 encryption above to encrypt notes before uploading.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        FilterChip(
+                            selected = isGistMode,
+                            onClick = {
+                                viewModel.updateSettings { it.copy(githubBackupMode = AppSettingsEntity.GITHUB_MODE_GIST) }
+                            },
+                            label = { Text("Secret Gist") }
+                        )
+                        FilterChip(
+                            selected = !isGistMode,
+                            onClick = {
+                                viewModel.updateSettings { it.copy(githubBackupMode = AppSettingsEntity.GITHUB_MODE_REPO) }
+                            },
+                            label = { Text("Repository File") }
+                        )
+                    }
+
+                    if (!isGistMode) {
+                        OutlinedTextField(
+                            value = repoSlugInput,
+                            onValueChange = { repoSlugInput = it },
+                            label = { Text("Repository (owner/repo)") },
+                            placeholder = { Text("mohammadparvaj/priyo-nots-backups") },
+                            singleLine = true,
+                            modifier = Modifier.fillMaxWidth()
+                        )
+                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            OutlinedTextField(
+                                value = repoBranchInput,
+                                onValueChange = { repoBranchInput = it },
+                                label = { Text("Branch") },
+                                singleLine = true,
+                                modifier = Modifier.weight(0.4f)
+                            )
+                            OutlinedTextField(
+                                value = repoPathInput,
+                                onValueChange = { repoPathInput = it },
+                                label = { Text("File path") },
+                                singleLine = true,
+                                modifier = Modifier.weight(0.6f)
+                            )
+                        }
+                    } else if (settings.githubGistId.isNotBlank()) {
+                        Text(
+                            text = "Linked Gist ID: ${settings.githubGistId}",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+
+                    settings.githubLastBackupAt?.let { syncedAt ->
+                        Text(
+                            text = "Last GitHub sync: ${formatTimestamp(syncedAt)} · ${settings.githubLastStatus}",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.primary
+                        )
+                    }
+
+                    Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                        Button(
+                            onClick = {
+                                if (!isGitHubConnected) {
+                                    showGitHubTokenDialog = true
+                                    return@Button
+                                }
+                                if (encryptEnabled && backupPassword.isBlank()) {
+                                    viewModel.emitMessage("Enter a password for encrypted backup")
+                                    return@Button
+                                }
+                                val pw = if (encryptEnabled) backupPassword else null
+                                if (isGistMode) {
+                                    viewModel.backupToGitHubGist(pw)
+                                } else {
+                                    viewModel.backupToGitHubRepo(repoSlugInput, repoBranchInput, repoPathInput, pw)
+                                }
+                            },
+                            modifier = Modifier.weight(1f).testTag("github_backup_now_button")
+                        ) {
+                            Icon(Icons.Outlined.CloudUpload, contentDescription = null)
+                            Spacer(modifier = Modifier.width(6.dp))
+                            Text("Backup")
+                        }
+                        OutlinedButton(
+                            onClick = {
+                                if (!isGitHubConnected) {
+                                    showGitHubTokenDialog = true
+                                    return@OutlinedButton
+                                }
+                                if (isGistMode) {
+                                    viewModel.refreshGitHubGists()
+                                    showGistPickerDialog = true
+                                } else {
+                                    scope.launch {
+                                        viewModel.fetchGitHubRepoRaw(repoSlugInput, repoBranchInput, repoPathInput)
+                                            .onSuccess { raw ->
+                                                restoreRequiresPassword = BackupCrypto.isEncryptedEnvelope(raw)
+                                                restorePassword = ""
+                                                pendingCloudRestoreText = raw
+                                            }
+                                            .onFailure { err ->
+                                                viewModel.emitMessage(err.message ?: "Failed to fetch backup from repo")
+                                            }
+                                    }
+                                }
+                            },
+                            modifier = Modifier.weight(1f).testTag("github_restore_button")
+                        ) {
+                            Icon(Icons.Outlined.CloudDownload, contentDescription = null)
+                            Spacer(modifier = Modifier.width(6.dp))
+                            Text("Restore")
+                        }
+                    }
+                }
+            }
         }
     }
 
-    pendingRestoreUri?.let { uri ->
+    if (showGitHubTokenDialog) {
         AlertDialog(
-            onDismissRequest = { pendingRestoreUri = null },
+            onDismissRequest = { showGitHubTokenDialog = false },
+            title = { Text("Connect GitHub Account") },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                    Text(
+                        text = "Paste a GitHub Personal Access Token (PAT) with 'gist' (for Secret Gist) or 'repo' (for private repository backup). Your token is encrypted on-device using Android Keystore.",
+                        style = MaterialTheme.typography.bodySmall
+                    )
+                    OutlinedTextField(
+                        value = gitHubTokenInput,
+                        onValueChange = { gitHubTokenInput = it },
+                        label = { Text("GitHub Personal Access Token") },
+                        visualTransformation = PasswordVisualTransformation(),
+                        singleLine = true,
+                        modifier = Modifier.fillMaxWidth().testTag("github_pat_input")
+                    )
+                    if (githubBusy) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            CircularProgressIndicator()
+                            Spacer(modifier = Modifier.width(10.dp))
+                            Text("Verifying token...")
+                        }
+                    }
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showGitHubTokenDialog = false }) { Text("Cancel") }
+            },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        val pat = gitHubTokenInput.trim()
+                        if (pat.isNotEmpty()) {
+                            viewModel.connectGitHubToken(pat)
+                            gitHubTokenInput = ""
+                            showGitHubTokenDialog = false
+                        }
+                    },
+                    enabled = gitHubTokenInput.isNotBlank() && !githubBusy
+                ) {
+                    Text("Verify & Connect")
+                }
+            }
+        )
+    }
+
+    if (showGistPickerDialog) {
+        AlertDialog(
+            onDismissRequest = { showGistPickerDialog = false },
+            title = { Text("Select GitHub Gist Backup") },
+            text = {
+                if (githubBusy) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        CircularProgressIndicator()
+                        Spacer(modifier = Modifier.width(10.dp))
+                        Text("Loading Gists...")
+                    }
+                } else if (githubGists.isEmpty()) {
+                    Text("No Priyo Nots backup Gists found on your GitHub account.")
+                } else {
+                    Column(
+                        modifier = Modifier.verticalScroll(rememberScrollState()),
+                        verticalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        githubGists.forEach { gist ->
+                            Card(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .clickable {
+                                        showGistPickerDialog = false
+                                        scope.launch {
+                                            viewModel.fetchGitHubGistRaw(gist.id)
+                                                .onSuccess { raw ->
+                                                    restoreRequiresPassword = BackupCrypto.isEncryptedEnvelope(raw)
+                                                    restorePassword = ""
+                                                    pendingCloudRestoreText = raw
+                                                }
+                                                .onFailure { err ->
+                                                    viewModel.emitMessage(err.message ?: "Failed to read Gist")
+                                                }
+                                        }
+                                    },
+                                border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant)
+                            ) {
+                                Column(modifier = Modifier.padding(12.dp)) {
+                                    Text(gist.fileName, style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.SemiBold)
+                                    Text(gist.description, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                    Text(
+                                        "${formatFileSize(gist.sizeBytes)} · ${gist.updatedAtIso.take(10)}",
+                                        style = MaterialTheme.typography.labelSmall
+                                    )
+                                }
+                            }
+                        }
+                    }
+                }
+            },
+            confirmButton = {
+                TextButton(onClick = { showGistPickerDialog = false }) { Text("Close") }
+            }
+        )
+    }
+
+    if (pendingRestoreUri != null || pendingCloudRestoreText != null) {
+        AlertDialog(
+            onDismissRequest = {
+                pendingRestoreUri = null
+                pendingCloudRestoreText = null
+            },
             title = { Text("Restore Options") },
             text = {
                 Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
@@ -471,16 +762,25 @@ fun BackupRestoreScreen(
                 }
             },
             dismissButton = {
-                TextButton(onClick = { pendingRestoreUri = null }) { Text("Cancel") }
+                TextButton(onClick = {
+                    pendingRestoreUri = null
+                    pendingCloudRestoreText = null
+                }) { Text("Cancel") }
             },
             confirmButton = {
                 TextButton(
                     onClick = {
-                        val target = uri
+                        val targetUri = pendingRestoreUri
+                        val cloudText = pendingCloudRestoreText
                         val mode = restoreMode
                         val pw = if (restoreRequiresPassword) restorePassword else null
                         pendingRestoreUri = null
-                        viewModel.restoreFromUri(target, mode, pw)
+                        pendingCloudRestoreText = null
+                        if (targetUri != null) {
+                            viewModel.restoreFromUri(targetUri, mode, pw)
+                        } else if (cloudText != null) {
+                            viewModel.restoreFromRawText(cloudText, mode, pw)
+                        }
                     },
                     enabled = !restoreRequiresPassword || restorePassword.isNotBlank()
                 ) {

@@ -10,6 +10,7 @@ import com.example.data.backup.AutoBackupScheduler
 import com.example.data.backup.BackupResult
 import com.example.data.backup.RestoreMode
 import com.example.data.backup.RestoreSummary
+import com.example.data.github.GitHubGistSummary
 import com.example.data.local.dao.ReminderWithNoteTitle
 import com.example.data.local.entity.AppSettingsEntity
 import com.example.data.local.entity.BackupHistoryEntity
@@ -125,11 +126,21 @@ class PriyoNotsViewModel(application: Application) : AndroidViewModel(applicatio
     private val _downloadState = MutableStateFlow<DownloadState>(DownloadState.Idle)
     val downloadState: StateFlow<DownloadState> = _downloadState.asStateFlow()
 
+    private val _githubGists = MutableStateFlow<List<GitHubGistSummary>>(emptyList())
+    val githubGists: StateFlow<List<GitHubGistSummary>> = _githubGists.asStateFlow()
+
+    private val _githubBusy = MutableStateFlow(false)
+    val githubBusy: StateFlow<Boolean> = _githubBusy.asStateFlow()
+
     init {
         // Automatic update check on launch if configured and enabled
         viewModelScope.launch {
             val s = repository.getSettings()
-            if (s.updateCheckEnabled && s.updateEndpointUrl.isNotBlank()) {
+            val hasSource = when (s.updateSourceType) {
+                AppSettingsEntity.UPDATE_SOURCE_GITHUB -> s.githubReleaseRepo.isNotBlank()
+                else -> s.updateEndpointUrl.isNotBlank()
+            }
+            if (s.updateCheckEnabled && hasSource) {
                 checkForUpdates(isAutomaticStartup = true)
             }
         }
@@ -380,10 +391,102 @@ class PriyoNotsViewModel(application: Application) : AndroidViewModel(applicatio
     suspend fun exportNoteAsJsonFile(note: NotesEntity): File =
         repository.exportNoteAsJsonFile(note)
 
+    fun hasGitHubToken(): Boolean = repository.hasGitHubToken()
+
+    fun connectGitHubToken(token: String) {
+        viewModelScope.launch {
+            _githubBusy.value = true
+            repository.connectGitHubToken(token)
+                .onSuccess { user ->
+                    emitMessage("Connected to GitHub as @${user.login}")
+                }
+                .onFailure { err ->
+                    emitMessage(err.message ?: "GitHub connection failed")
+                }
+            _githubBusy.value = false
+        }
+    }
+
+    fun disconnectGitHub() {
+        viewModelScope.launch {
+            repository.disconnectGitHub()
+            _githubGists.value = emptyList()
+            emitMessage("GitHub disconnected")
+        }
+    }
+
+    fun backupToGitHubGist(password: String?) {
+        viewModelScope.launch {
+            _backupState.value = BackupOperationState.InProgress(0.4f, "Uploading backup to GitHub Secret Gist...")
+            repository.backupToGitHubGist(password)
+                .onSuccess { cloud ->
+                    _backupState.value = BackupOperationState.Idle
+                    emitMessage("GitHub Secret Gist synced (${cloud.fileName})")
+                }
+                .onFailure { err ->
+                    _backupState.value = BackupOperationState.Error(err.message ?: "GitHub Gist backup failed")
+                }
+        }
+    }
+
+    fun backupToGitHubRepo(repoSlug: String, branch: String, filePath: String, password: String?) {
+        viewModelScope.launch {
+            _backupState.value = BackupOperationState.InProgress(0.4f, "Pushing backup to GitHub repository...")
+            repository.backupToGitHubRepo(repoSlug, branch, filePath, password)
+                .onSuccess { cloud ->
+                    _backupState.value = BackupOperationState.Idle
+                    emitMessage("Pushed ${cloud.fileName} to GitHub repo")
+                }
+                .onFailure { err ->
+                    _backupState.value = BackupOperationState.Error(err.message ?: "GitHub repo backup failed")
+                }
+        }
+    }
+
+    fun refreshGitHubGists() {
+        viewModelScope.launch {
+            _githubBusy.value = true
+            repository.listGitHubGists()
+                .onSuccess { list -> _githubGists.value = list }
+                .onFailure { err -> emitMessage(err.message ?: "Failed to list GitHub Gists") }
+            _githubBusy.value = false
+        }
+    }
+
+    suspend fun fetchGitHubGistRaw(gistId: String): Result<String> =
+        repository.fetchGitHubGistRaw(gistId)
+
+    suspend fun fetchGitHubRepoRaw(repoSlug: String, branch: String, filePath: String): Result<String> =
+        repository.fetchGitHubRepoRaw(repoSlug, branch, filePath)
+
+    fun restoreFromRawText(rawText: String, mode: RestoreMode, password: String?) {
+        viewModelScope.launch {
+            _backupState.value = BackupOperationState.InProgress(0.15f, "Validating GitHub backup...")
+            runCatching {
+                repository.restoreFromRawBackupText(rawText, mode, password) { progress, msg ->
+                    _backupState.value = BackupOperationState.InProgress(progress, msg)
+                }
+            }.onSuccess { summary ->
+                _backupState.value = BackupOperationState.RestoreDone(summary)
+            }.onFailure { err ->
+                _backupState.value = BackupOperationState.Error(err.message ?: "GitHub restore failed")
+            }
+        }
+    }
+
     fun checkForUpdates(isAutomaticStartup: Boolean = false) {
         viewModelScope.launch {
             val currentSettings = repository.getSettings()
-            if (currentSettings.updateEndpointUrl.isBlank()) {
+            val useGitHub = currentSettings.updateSourceType == AppSettingsEntity.UPDATE_SOURCE_GITHUB
+            if (useGitHub && currentSettings.githubReleaseRepo.isBlank()) {
+                if (!isAutomaticStartup) {
+                    _updateState.value = UpdateCheckUiState.Error(
+                        "Enter a GitHub repository (owner/repo) to check GitHub Releases."
+                    )
+                }
+                return@launch
+            }
+            if (!useGitHub && currentSettings.updateEndpointUrl.isBlank()) {
                 if (!isAutomaticStartup) {
                     _updateState.value = UpdateCheckUiState.Error(
                         "No HTTPS update endpoint URL configured. Enter one in Settings or Update screen."
@@ -394,7 +497,11 @@ class PriyoNotsViewModel(application: Application) : AndroidViewModel(applicatio
             if (!isAutomaticStartup) {
                 _updateState.value = UpdateCheckUiState.Checking
             }
-            val result = repository.checkForUpdate(currentSettings.updateEndpointUrl)
+            val result = if (useGitHub) {
+                repository.checkForGitHubReleaseUpdate(currentSettings.githubReleaseRepo)
+            } else {
+                repository.checkForUpdate(currentSettings.updateEndpointUrl)
+            }
             result.onSuccess { meta ->
                 val now = System.currentTimeMillis()
                 repository.updateSettings { it.copy(lastUpdateCheckAt = now) }

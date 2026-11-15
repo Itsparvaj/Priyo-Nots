@@ -26,7 +26,18 @@ data class AppSettingsEntity(
     val contactEmail: String = "",
     val contactWebsite: String = "",
     val privacyModeHidePreviews: Boolean = false,
-    val updatedAt: Long = System.currentTimeMillis()
+    val updatedAt: Long = System.currentTimeMillis(),
+    // GitHub integration fields (added in DB v2)
+    val updateSourceType: String = UPDATE_SOURCE_GITHUB,
+    val githubReleaseRepo: String = "",
+    val githubUsername: String = "",
+    val githubBackupMode: String = GITHUB_MODE_GIST,
+    val githubGistId: String = "",
+    val githubRepoSlug: String = "",
+    val githubRepoBranch: String = "main",
+    val githubRepoFilePath: String = "backups/priyo_nots_backup.json",
+    val githubLastBackupAt: Long? = null,
+    val githubLastStatus: String = "Not connected"
 ) {
     companion object {
         const val THEME_SYSTEM = "SYSTEM"
@@ -37,5 +48,11 @@ data class AppSettingsEntity(
         const val SORT_CREATED_DESC = "CREATED_DESC"
         const val SORT_TITLE_ASC = "TITLE_ASC"
         const val SORT_TITLE_DESC = "TITLE_DESC"
+
+        const val UPDATE_SOURCE_GITHUB = "GITHUB_RELEASES"
+        const val UPDATE_SOURCE_CUSTOM_JSON = "CUSTOM_JSON"
+
+        const val GITHUB_MODE_GIST = "GIST"
+        const val GITHUB_MODE_REPO = "REPO"
     }
 }

@@ -31,7 +31,13 @@ data class UpdateMetadata(
     val sha256: String? = null
 ) {
     val isNewerThanInstalled: Boolean
-        get() = versionCode > BuildConfig.VERSION_CODE
+        get() = com.example.data.github.GitHubService.compareSemanticVersions(
+            versionName,
+            BuildConfig.VERSION_NAME
+        ) > 0 || versionCode > BuildConfig.VERSION_CODE
+
+    val hasDirectApkAsset: Boolean
+        get() = downloadUrl.endsWith(".apk", ignoreCase = true)
 }
 
 sealed interface DownloadState {

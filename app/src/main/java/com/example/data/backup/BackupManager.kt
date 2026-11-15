@@ -221,7 +221,15 @@ class BackupManager(
     ): RestoreSummary = withContext(Dispatchers.IO) {
         onProgress(0.15f, "Reading backup file...")
         val rawText = AtomicFileHelper.readTextFromUri(context, uri)
+        restoreFromRawText(rawText, mode, password, onProgress)
+    }
 
+    suspend fun restoreFromRawText(
+        rawText: String,
+        mode: RestoreMode,
+        password: String?,
+        onProgress: (Float, String) -> Unit = { _, _ -> }
+    ): RestoreSummary = withContext(Dispatchers.IO) {
         onProgress(0.30f, "Validating format...")
         val plainJson = if (BackupCrypto.isEncryptedEnvelope(rawText)) {
             if (password.isNullOrBlank()) {
@@ -388,6 +396,26 @@ class BackupManager(
         val file = File(AtomicFileHelper.getExportsDir(context), fileName)
         AtomicFileHelper.writeTextAtomically(file, json)
         file
+    }
+
+    suspend fun recordExternalBackupSuccess(
+        fileName: String,
+        fileUri: String,
+        sizeBytes: Long,
+        counts: Triple<Int, Int, Int>,
+        isEncrypted: Boolean,
+        backupType: String,
+        locationLabel: String
+    ) {
+        recordBackupSuccess(
+            fileName = fileName,
+            fileUri = fileUri,
+            sizeBytes = sizeBytes,
+            counts = counts,
+            isEncrypted = isEncrypted,
+            backupType = backupType,
+            locationLabel = locationLabel
+        )
     }
 
     private suspend fun recordBackupSuccess(

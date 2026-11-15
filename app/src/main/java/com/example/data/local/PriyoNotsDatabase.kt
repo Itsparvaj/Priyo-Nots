@@ -28,7 +28,7 @@ import kotlinx.coroutines.launch
         AppSettingsEntity::class,
         BackupHistoryEntity::class
     ],
-    version = 1,
+    version = 2,
     exportSchema = false
 )
 abstract class PriyoNotsDatabase : RoomDatabase() {
@@ -46,12 +46,20 @@ abstract class PriyoNotsDatabase : RoomDatabase() {
         private var INSTANCE: PriyoNotsDatabase? = null
 
         /**
-         * Explicit forward-compatible migration registry.
-         * Never use fallbackToDestructiveMigration() so user notes are never lost on app updates.
+         * Safe non-destructive migration from v1 to v2 adding GitHub Releases and Gist/Repo backup columns.
          */
         val MIGRATION_1_2: Migration = object : Migration(1, 2) {
             override fun migrate(db: SupportSQLiteDatabase) {
-                // Reserved for future schema upgrades without losing existing user data.
+                db.execSQL("ALTER TABLE app_settings ADD COLUMN updateSourceType TEXT NOT NULL DEFAULT 'GITHUB_RELEASES'")
+                db.execSQL("ALTER TABLE app_settings ADD COLUMN githubReleaseRepo TEXT NOT NULL DEFAULT ''")
+                db.execSQL("ALTER TABLE app_settings ADD COLUMN githubUsername TEXT NOT NULL DEFAULT ''")
+                db.execSQL("ALTER TABLE app_settings ADD COLUMN githubBackupMode TEXT NOT NULL DEFAULT 'GIST'")
+                db.execSQL("ALTER TABLE app_settings ADD COLUMN githubGistId TEXT NOT NULL DEFAULT ''")
+                db.execSQL("ALTER TABLE app_settings ADD COLUMN githubRepoSlug TEXT NOT NULL DEFAULT ''")
+                db.execSQL("ALTER TABLE app_settings ADD COLUMN githubRepoBranch TEXT NOT NULL DEFAULT 'main'")
+                db.execSQL("ALTER TABLE app_settings ADD COLUMN githubRepoFilePath TEXT NOT NULL DEFAULT 'backups/priyo_nots_backup.json'")
+                db.execSQL("ALTER TABLE app_settings ADD COLUMN githubLastBackupAt INTEGER")
+                db.execSQL("ALTER TABLE app_settings ADD COLUMN githubLastStatus TEXT NOT NULL DEFAULT 'Not connected'")
             }
         }
 

@@ -9,6 +9,7 @@ import com.example.data.backup.BackupCrypto
 import com.example.data.backup.BackupJsonCodec
 import com.example.data.backup.BackupManager
 import com.example.data.backup.RestoreMode
+import com.example.data.github.GitHubService
 import com.example.data.local.PriyoNotsDatabase
 import com.example.data.local.entity.CategoriesEntity
 import com.example.data.local.entity.NotesEntity
@@ -153,5 +154,51 @@ class PriyoNotsDatabaseBackupTest {
         assertFalse(sanitized.contains("<script>"))
         assertFalse(sanitized.contains("onclick"))
         assertNotNull(sanitized)
+    }
+
+    @Test
+    fun `github repo slug normalization and release parsing`() {
+        assertEquals("mohammadparvaj/priyo-nots", GitHubService.normalizeRepoSlug("https://github.com/mohammadparvaj/priyo-nots.git"))
+        assertEquals("mohammadparvaj/priyo-nots", GitHubService.normalizeRepoSlug("mohammadparvaj/priyo-nots"))
+        assertEquals(null, GitHubService.normalizeRepoSlug("invalid-slug"))
+
+        assertTrue(GitHubService.compareSemanticVersions("2.1.0", "1.0") > 0)
+        assertEquals(0, GitHubService.compareSemanticVersions("v1.0.0", "1.0"))
+
+        val releaseJson = """
+            {
+              "tag_name": "v2.3.1",
+              "name": "Priyo Nots v2.3.1",
+              "body": "Added cloud sync [force-update]",
+              "html_url": "https://github.com/mohammadparvaj/priyo-nots/releases/tag/v2.3.1",
+              "assets": [
+                {
+                  "name": "PriyoNots-v2.3.1-release.apk",
+                  "browser_download_url": "https://github.com/mohammadparvaj/priyo-nots/releases/download/v2.3.1/PriyoNots-v2.3.1-release.apk",
+                  "digest": "sha256:abcdef123456"
+                }
+              ]
+            }
+        """.trimIndent()
+
+        val meta = GitHubService.parseReleaseJson(releaseJson)
+        assertEquals("2.3.1", meta.versionName)
+        assertTrue(meta.isNewerThanInstalled)
+        assertTrue(meta.hasDirectApkAsset)
+        assertTrue(meta.forceUpdate)
+        assertEquals("abcdef123456", meta.sha256)
+    }
+
+    @Test
+    fun `cloud raw text restore works with encrypted payload`(): Unit = runBlocking {
+        db.notesDao().insertNote(
+            NotesEntity(title = "Cloud Note", contentHtml = "<p>Synced</p>", plainText = "Synced", wordCount = 1)
+        )
+        val manager = BackupManager(context, db)
+        val (encrypted, _) = manager.createBackupPayload("CloudKey99")
+
+        val summary = manager.restoreFromRawText(encrypted, RestoreMode.REPLACE, "CloudKey99")
+        assertEquals(1, summary.notesAdded)
+        assertEquals("Cloud Note", db.notesDao().getAllNotesRaw().first().title)
     }
 }
