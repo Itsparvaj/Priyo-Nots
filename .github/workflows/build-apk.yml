@@ -7,7 +7,7 @@ on:
   workflow_dispatch:
     inputs:
       release_tag:
-        description: 'Release tag (e.g. v1.0.0) to publish under GitHub Releases'
+        description: 'Release tag (e.g. v1.0.1) to publish under GitHub Releases'
         required: false
         default: 'v1.0.0'
 
@@ -20,6 +20,27 @@ jobs:
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
+
+      - name: Determine release version metadata
+        run: |
+          if [[ "${{ github.ref }}" == refs/tags/v* ]]; then
+            TAG_NAME="${{ github.ref_name }}"
+          elif [[ "${{ github.event_name }}" == "workflow_dispatch" && -n "${{ inputs.release_tag }}" ]]; then
+            TAG_NAME="${{ inputs.release_tag }}"
+          else
+            TAG_NAME="v1.0.0"
+          fi
+          CLEAN_VER="${TAG_NAME#v}"
+          CLEAN_VER="${CLEAN_VER#V}"
+          IFS='.' read -r MAJOR MINOR PATCH <<< "${CLEAN_VER//[^0-9.]/}"
+          MAJOR=${MAJOR:-1}
+          MINOR=${MINOR:-0}
+          PATCH=${PATCH:-0}
+          VER_CODE=$(( MAJOR * 10000 + MINOR * 100 + PATCH ))
+          echo "RELEASE_TAG=$TAG_NAME" >> "$GITHUB_ENV"
+          echo "APP_VERSION_NAME=$CLEAN_VER" >> "$GITHUB_ENV"
+          echo "APP_VERSION_CODE=$VER_CODE" >> "$GITHUB_ENV"
+          echo "Building Priyo Nots $TAG_NAME (versionName=$CLEAN_VER, versionCode=$VER_CODE)"
 
       - name: Set up JDK 21
         uses: actions/setup-java@v4
@@ -75,21 +96,21 @@ jobs:
       - name: Prepare APK artifact
         run: |
           mkdir -p dist
-          cp app/build/outputs/apk/debug/app-debug.apk dist/PriyoNots-v1.0.apk
+          cp app/build/outputs/apk/debug/app-debug.apk "dist/PriyoNots-v${APP_VERSION_NAME}.apk"
 
       - name: Upload APK Artifact
         uses: actions/upload-artifact@v4
         with:
           name: PriyoNots-APK
-          path: dist/PriyoNots-v1.0.apk
+          path: dist/PriyoNots-v*.apk
 
       - name: Publish GitHub Release
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: ${{ startsWith(github.ref, 'refs/tags/') && github.ref_name || (github.event_name == 'workflow_dispatch' && inputs.release_tag || 'v1.0.0') }}
-          name: Priyo Nots ${{ startsWith(github.ref, 'refs/tags/') && github.ref_name || (github.event_name == 'workflow_dispatch' && inputs.release_tag || 'v1.0.0') }}
+          tag_name: ${{ env.RELEASE_TAG }}
+          name: Priyo Nots ${{ env.RELEASE_TAG }}
           make_latest: true
           body: |
-            Installable Android APK for **Priyo Nots** (Owner: Mohammad Parvaj).
-            Download `PriyoNots-v1.0.apk` below and install it on Android 7.0+.
-          files: dist/PriyoNots-v1.0.apk
+            Installable Android APK for **Priyo Nots ${{ env.RELEASE_TAG }}** (Owner: Mohammad Parvaj).
+            Tap **Update Now** inside Priyo Nots or download the `.apk` asset below to update directly.
+          files: dist/PriyoNots-v*.apk

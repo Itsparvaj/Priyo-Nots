@@ -1,7 +1,12 @@
 package com.example.ui.screens
 
+import android.Manifest
 import android.content.Intent
+import android.content.pm.PackageManager
 import android.net.Uri
+import android.os.Build
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.Image
@@ -33,6 +38,7 @@ import androidx.compose.material.icons.outlined.ErrorOutline
 import androidx.compose.material.icons.outlined.ExpandLess
 import androidx.compose.material.icons.outlined.ExpandMore
 import androidx.compose.material.icons.outlined.NewReleases
+import androidx.compose.material.icons.outlined.NotificationsActive
 import androidx.compose.material.icons.outlined.Refresh
 import androidx.compose.material.icons.outlined.Settings
 import androidx.compose.material.icons.outlined.VerifiedUser
@@ -56,6 +62,7 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -70,11 +77,13 @@ import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.core.content.ContextCompat
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.example.BuildConfig
 import com.example.R
 import com.example.data.local.entity.AppSettingsEntity
 import com.example.data.update.DownloadState
+import com.example.data.update.UpdateNotificationHelper
 import com.example.ui.components.formatFileSize
 import com.example.ui.components.formatTimestamp
 import com.example.ui.viewmodel.PriyoNotsViewModel
@@ -90,6 +99,24 @@ fun UpdateScreen(
     val settings by viewModel.settings.collectAsStateWithLifecycle()
     val updateState by viewModel.updateState.collectAsStateWithLifecycle()
     val downloadState by viewModel.downloadState.collectAsStateWithLifecycle()
+    val autoTriggerInstall by viewModel.autoTriggerInstallOnVerified.collectAsStateWithLifecycle()
+
+    LaunchedEffect(Unit) {
+        UpdateNotificationHelper.cancelUpdateNotification(context)
+    }
+
+    LaunchedEffect(downloadState, autoTriggerInstall) {
+        val verified = downloadState as? DownloadState.Verified
+        if (verified != null && autoTriggerInstall) {
+            viewModel.consumeAutoInstallTrigger()
+            if (!viewModel.canInstallPackages()) {
+                context.startActivity(viewModel.buildInstallSettingsIntent())
+                viewModel.emitMessage("Allow unknown app installs for Priyo Nots, then tap Install Update.")
+            } else {
+                context.startActivity(viewModel.buildInstallApkIntent(verified.apkFile))
+            }
+        }
+    }
 
     var showAdvancedOptions by remember { mutableStateOf(false) }
     var githubRepoInput by remember(settings.githubReleaseRepo) {
@@ -99,6 +126,24 @@ fun UpdateScreen(
         mutableStateOf(settings.updateEndpointUrl)
     }
     val useGitHub = settings.updateSourceType == AppSettingsEntity.UPDATE_SOURCE_GITHUB
+
+    var hasNotificationPermission by remember {
+        mutableStateOf(
+            Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU ||
+                ContextCompat.checkSelfPermission(
+                    context,
+                    Manifest.permission.POST_NOTIFICATIONS
+                ) == PackageManager.PERMISSION_GRANTED
+        )
+    }
+    val notificationPermissionLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.RequestPermission()
+    ) { granted ->
+        hasNotificationPermission = granted
+        if (granted) {
+            viewModel.emitMessage("Update notifications enabled")
+        }
+    }
 
     Scaffold(
         contentWindowInsets = WindowInsets.safeDrawing,
@@ -580,6 +625,49 @@ fun UpdateScreen(
                                     viewModel.updateSettings { it.copy(updateCheckEnabled = enabled) }
                                 }
                             )
+                        }
+
+                        if (!hasNotificationPermission && Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                            Surface(
+                                shape = MaterialTheme.shapes.small,
+                                color = MaterialTheme.colorScheme.secondaryContainer.copy(alpha = 0.7f),
+                                border = BorderStroke(1.dp, MaterialTheme.colorScheme.secondary.copy(alpha = 0.35f))
+                            ) {
+                                Row(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .padding(12.dp),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(10.dp)
+                                ) {
+                                    Icon(
+                                        Icons.Outlined.NotificationsActive,
+                                        contentDescription = null,
+                                        tint = MaterialTheme.colorScheme.onSecondaryContainer,
+                                        modifier = Modifier.size(20.dp)
+                                    )
+                                    Column(modifier = Modifier.weight(1f)) {
+                                        Text(
+                                            text = "Enable Notification Permission",
+                                            style = MaterialTheme.typography.labelLarge,
+                                            fontWeight = FontWeight.SemiBold,
+                                            color = MaterialTheme.colorScheme.onSecondaryContainer
+                                        )
+                                        Text(
+                                            text = "Allow notifications to receive alerts when a new APK release is published.",
+                                            style = MaterialTheme.typography.bodySmall,
+                                            color = MaterialTheme.colorScheme.onSecondaryContainer
+                                        )
+                                    }
+                                    OutlinedButton(
+                                        onClick = {
+                                            notificationPermissionLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
+                                        }
+                                    ) {
+                                        Text("Allow", maxLines = 1, softWrap = false)
+                                    }
+                                }
+                            }
                         }
 
                         HorizontalDivider()

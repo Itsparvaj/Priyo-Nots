@@ -274,4 +274,23 @@ class PriyoNotsDatabaseBackupTest {
         )
         assertTrue(newerMeta.isNewerThanInstalled)
     }
+
+    @Test
+    fun `update metadata detects direct apk assets cleanly`() {
+        val apkMeta = com.example.data.update.UpdateMetadata(
+            versionCode = 2,
+            versionName = "1.1.0",
+            updateTitle = "Update",
+            updateMessage = "New APK",
+            downloadUrl = "https://github.com/Itsparvaj/Priyo-Nots/releases/download/v1.1.0/PriyoNots-v1.1.0.APK?download=1",
+            releaseNotes = "Bug fixes",
+            forceUpdate = false
+        )
+        assertTrue(apkMeta.hasDirectApkAsset)
+
+        val pageMeta = apkMeta.copy(
+            downloadUrl = "https://github.com/Itsparvaj/Priyo-Nots/releases/tag/v1.1.0"
+        )
+        assertFalse(pageMeta.hasDirectApkAsset)
+    }
 }

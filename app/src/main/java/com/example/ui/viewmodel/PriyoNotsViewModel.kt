@@ -20,7 +20,9 @@ import com.example.data.local.entity.NotesEntity
 import com.example.data.local.model.CategoryWithCount
 import com.example.data.local.model.NoteWithRelations
 import com.example.data.update.DownloadState
+import com.example.data.update.UpdateCheckScheduler
 import com.example.data.update.UpdateMetadata
+import com.example.data.update.UpdateNotificationHelper
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableSharedFlow
@@ -126,6 +128,14 @@ class PriyoNotsViewModel(application: Application) : AndroidViewModel(applicatio
 
     private val _downloadState = MutableStateFlow<DownloadState>(DownloadState.Idle)
     val downloadState: StateFlow<DownloadState> = _downloadState.asStateFlow()
+
+    private val _showInAppUpdatePrompt = MutableStateFlow(false)
+    val showInAppUpdatePrompt: StateFlow<Boolean> = _showInAppUpdatePrompt.asStateFlow()
+
+    private val _autoTriggerInstallOnVerified = MutableStateFlow(false)
+    val autoTriggerInstallOnVerified: StateFlow<Boolean> = _autoTriggerInstallOnVerified.asStateFlow()
+
+    private var lastAutoCheckAttemptMs: Long = 0L
 
     private val _githubGists = MutableStateFlow<List<GitHubGistSummary>>(emptyList())
     val githubGists: StateFlow<List<GitHubGistSummary>> = _githubGists.asStateFlow()
@@ -312,6 +322,11 @@ class PriyoNotsViewModel(application: Application) : AndroidViewModel(applicatio
                 AutoBackupScheduler.schedulePeriodicBackup(app, updated.backupFrequencyHours)
             } else {
                 AutoBackupScheduler.cancelPeriodicBackup(app)
+            }
+            if (updated.updateCheckEnabled) {
+                UpdateCheckScheduler.schedulePeriodicUpdateCheck(app)
+            } else {
+                UpdateCheckScheduler.cancelPeriodicUpdateCheck(app)
             }
         }
     }
@@ -530,8 +545,25 @@ class PriyoNotsViewModel(application: Application) : AndroidViewModel(applicatio
     suspend fun fetchGoogleDriveBackupRaw(accessToken: String, fileId: String): Result<String> =
         repository.fetchGoogleDriveBackupRaw(accessToken, fileId)
 
+    fun refreshUpdatesIfStale() {
+        val now = System.currentTimeMillis()
+        if (now - lastAutoCheckAttemptMs < UPDATE_REFRESH_INTERVAL_MS) return
+        if (_updateState.value is UpdateCheckUiState.Checking) return
+        viewModelScope.launch {
+            val s = repository.getSettings()
+            val hasSource = when (s.updateSourceType) {
+                AppSettingsEntity.UPDATE_SOURCE_GITHUB -> true
+                else -> s.updateEndpointUrl.isNotBlank()
+            }
+            if (s.updateCheckEnabled && hasSource) {
+                checkForUpdates(isAutomaticStartup = true)
+            }
+        }
+    }
+
     fun checkForUpdates(isAutomaticStartup: Boolean = false) {
         viewModelScope.launch {
+            lastAutoCheckAttemptMs = System.currentTimeMillis()
             val currentSettings = repository.getSettings()
             val useGitHub = currentSettings.updateSourceType == AppSettingsEntity.UPDATE_SOURCE_GITHUB
             val effectiveRepo = currentSettings.githubReleaseRepo.ifBlank { AppSettingsEntity.DEFAULT_UPDATE_REPO }
@@ -555,12 +587,29 @@ class PriyoNotsViewModel(application: Application) : AndroidViewModel(applicatio
                 val now = System.currentTimeMillis()
                 repository.updateSettings { it.copy(lastUpdateCheckAt = now) }
                 if (meta != null && meta.isNewerThanInstalled) {
-                    if (isAutomaticStartup && !meta.forceUpdate && meta.versionCode == currentSettings.dismissedUpdateVersionCode) {
-                        return@onSuccess
-                    }
                     _updateState.value = UpdateCheckUiState.Available(meta)
-                } else if (!isAutomaticStartup) {
-                    _updateState.value = UpdateCheckUiState.UpToDate(now)
+                    val alreadyDismissed = isAutomaticStartup &&
+                        !meta.forceUpdate &&
+                        meta.versionCode == currentSettings.dismissedUpdateVersionCode
+                    if (!alreadyDismissed) {
+                        if (isAutomaticStartup) {
+                            _showInAppUpdatePrompt.value = true
+                        }
+                        if (currentSettings.notificationsEnabled) {
+                            UpdateNotificationHelper.showUpdateAvailableNotification(
+                                getApplication(),
+                                meta
+                            )
+                        }
+                    }
+                } else {
+                    UpdateNotificationHelper.cancelUpdateNotification(getApplication())
+                    _showInAppUpdatePrompt.value = false
+                    if (!isAutomaticStartup) {
+                        _updateState.value = UpdateCheckUiState.UpToDate(now)
+                    } else if (_updateState.value is UpdateCheckUiState.Available) {
+                        _updateState.value = UpdateCheckUiState.Idle
+                    }
                 }
             }.onFailure { err ->
                 if (!isAutomaticStartup) {
@@ -570,7 +619,19 @@ class PriyoNotsViewModel(application: Application) : AndroidViewModel(applicatio
         }
     }
 
+    fun openInAppUpdateDialog() {
+        if (_updateState.value is UpdateCheckUiState.Available) {
+            _showInAppUpdatePrompt.value = true
+        }
+    }
+
+    fun dismissInAppUpdatePrompt() {
+        _showInAppUpdatePrompt.value = false
+    }
+
     fun dismissUpdateForVersion(versionCode: Int) {
+        _showInAppUpdatePrompt.value = false
+        UpdateNotificationHelper.cancelUpdateNotification(getApplication())
         viewModelScope.launch {
             repository.updateSettings { it.copy(dismissedUpdateVersionCode = versionCode) }
             _updateState.value = UpdateCheckUiState.Idle
@@ -579,19 +640,32 @@ class PriyoNotsViewModel(application: Application) : AndroidViewModel(applicatio
 
     fun startUpdateDownload(metadata: UpdateMetadata) {
         viewModelScope.launch {
+            _autoTriggerInstallOnVerified.value = true
             repository.downloadUpdateApk(metadata).collect { state ->
                 _downloadState.value = state
+                if (state is DownloadState.Verified) {
+                    UpdateNotificationHelper.cancelUpdateNotification(getApplication())
+                }
             }
         }
     }
 
+    fun consumeAutoInstallTrigger() {
+        _autoTriggerInstallOnVerified.value = false
+    }
+
     fun resetDownloadState() {
+        _autoTriggerInstallOnVerified.value = false
         _downloadState.value = DownloadState.Idle
     }
 
     fun canInstallPackages(): Boolean = repository.canInstallPackages()
     fun buildInstallSettingsIntent(): Intent = repository.buildInstallSettingsIntent()
     fun buildInstallApkIntent(file: File): Intent = repository.buildInstallApkIntent(file)
+
+    companion object {
+        private const val UPDATE_REFRESH_INTERVAL_MS = 30L * 60_000L
+    }
 
     private fun sortNotes(list: List<NoteWithRelations>, sortOrder: String): List<NoteWithRelations> {
         val comparator = when (sortOrder) {

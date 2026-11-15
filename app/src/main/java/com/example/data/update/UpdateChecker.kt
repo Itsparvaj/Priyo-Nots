@@ -42,7 +42,12 @@ data class UpdateMetadata(
         }
 
     val hasDirectApkAsset: Boolean
-        get() = downloadUrl.endsWith(".apk", ignoreCase = true)
+        get() {
+            val trimmed = downloadUrl.trim()
+            if (trimmed.isEmpty()) return false
+            val cleanPath = trimmed.substringBefore('?').substringBefore('#')
+            return cleanPath.endsWith(".apk", ignoreCase = true)
+        }
 }
 
 sealed interface DownloadState {
@@ -118,11 +123,7 @@ class UpdateChecker(private val context: Context) {
         var connection: HttpURLConnection? = null
         try {
             emit(DownloadState.Downloading(0f, 0L, -1L))
-            connection = (URL(urlString).openConnection() as HttpURLConnection).apply {
-                connectTimeout = 15_000
-                readTimeout = 30_000
-                instanceFollowRedirects = true
-            }
+            connection = openDownloadConnectionWithRedirects(urlString)
             val code = connection.responseCode
             if (code !in 200..299) {
                 emit(DownloadState.Failed("Download failed with HTTP $code"))
@@ -227,5 +228,33 @@ class UpdateChecker(private val context: Context) {
             addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
             addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
         }
+    }
+
+    private fun openDownloadConnectionWithRedirects(initialUrl: String): HttpURLConnection {
+        var currentUrl = initialUrl
+        for (hop in 0 until 6) {
+            if (!currentUrl.startsWith("https://", ignoreCase = true)) {
+                throw IllegalArgumentException("Update download redirected to non-HTTPS URL")
+            }
+            val conn = (URL(currentUrl).openConnection() as HttpURLConnection).apply {
+                connectTimeout = 15_000
+                readTimeout = 30_000
+                instanceFollowRedirects = false
+                setRequestProperty("Accept", "application/vnd.android.package-archive, application/octet-stream, */*")
+                setRequestProperty("User-Agent", "PriyoNots-Android/${BuildConfig.VERSION_NAME}")
+            }
+            val code = conn.responseCode
+            if (code in listOf(301, 302, 303, 307, 308)) {
+                val location = conn.getHeaderField("Location").orEmpty().trim()
+                conn.disconnect()
+                if (location.isEmpty()) {
+                    throw IllegalStateException("Redirect location missing (HTTP $code)")
+                }
+                currentUrl = URL(URL(currentUrl), location).toString()
+                continue
+            }
+            return conn
+        }
+        throw IllegalStateException("Too many redirects while downloading APK")
     }
 }

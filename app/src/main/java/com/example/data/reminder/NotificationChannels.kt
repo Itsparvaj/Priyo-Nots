@@ -27,9 +27,10 @@ object NotificationChannels {
         val updateChannel = NotificationChannel(
             CHANNEL_UPDATES,
             context.getString(R.string.update_channel_name),
-            NotificationManager.IMPORTANCE_DEFAULT
+            NotificationManager.IMPORTANCE_HIGH
         ).apply {
             description = context.getString(R.string.update_channel_desc)
+            enableVibration(true)
         }
 
         val backupChannel = NotificationChannel(

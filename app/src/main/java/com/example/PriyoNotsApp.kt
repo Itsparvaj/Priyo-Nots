@@ -5,6 +5,7 @@ import com.example.data.backup.AutoBackupScheduler
 import com.example.data.local.PriyoNotsDatabase
 import com.example.data.reminder.NotificationChannels
 import com.example.data.repository.PriyoNotsRepository
+import com.example.data.update.UpdateCheckScheduler
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -30,6 +31,9 @@ class PriyoNotsApp : Application() {
             val settings = repository.getSettings()
             if (settings.autoBackupEnabled) {
                 AutoBackupScheduler.schedulePeriodicBackup(this@PriyoNotsApp, settings.backupFrequencyHours)
+            }
+            if (settings.updateCheckEnabled) {
+                UpdateCheckScheduler.schedulePeriodicUpdateCheck(this@PriyoNotsApp)
             }
         }
     }
