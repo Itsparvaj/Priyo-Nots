@@ -3,6 +3,7 @@ package com.example.ui.screens
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
@@ -472,19 +473,31 @@ fun HomeScreen(
                         Row(
                             modifier = Modifier
                                 .fillMaxWidth()
+                                .horizontalScroll(rememberScrollState())
                                 .padding(horizontal = 16.dp, vertical = 4.dp),
                             horizontalArrangement = Arrangement.spacedBy(8.dp),
                             verticalAlignment = Alignment.CenterVertically
                         ) {
-                            val backupSummary = settings.lastBackupAt?.let {
-                                "Backup: ${formatShortDate(it)}"
-                            } ?: "Not backed up yet"
+                            val latestBackup = listOfNotNull(
+                                settings.lastBackupAt,
+                                settings.googleDriveLastBackupAt
+                            ).maxOrNull()
+                            val backupSummary = when {
+                                settings.googleDriveEmail.isNotBlank() && latestBackup != null ->
+                                    "Drive Synced · ${formatShortDate(latestBackup)}"
+                                latestBackup != null ->
+                                    "Backup · ${formatShortDate(latestBackup)}"
+                                settings.googleDriveEmail.isNotBlank() ->
+                                    "Drive Connected"
+                                else -> "Set Up Backup"
+                            }
                             AssistChip(
                                 onClick = onOpenBackupRestore,
                                 label = {
                                     Text(
                                         text = backupSummary,
                                         maxLines = 1,
+                                        softWrap = false,
                                         overflow = TextOverflow.Ellipsis
                                     )
                                 },
@@ -501,7 +514,7 @@ fun HomeScreen(
                                 val meta = (updateState as UpdateCheckUiState.Available).metadata
                                 AssistChip(
                                     onClick = onOpenUpdates,
-                                    label = { Text("Update v${meta.versionName}") },
+                                    label = { Text("Update v${meta.versionName}", maxLines = 1, softWrap = false) },
                                     leadingIcon = {
                                         Icon(
                                             Icons.Outlined.SystemUpdate,

@@ -29,7 +29,7 @@ data class AppSettingsEntity(
     val updatedAt: Long = System.currentTimeMillis(),
     // GitHub integration fields (added in DB v2)
     val updateSourceType: String = UPDATE_SOURCE_GITHUB,
-    val githubReleaseRepo: String = "",
+    val githubReleaseRepo: String = DEFAULT_UPDATE_REPO,
     val githubUsername: String = "",
     val githubBackupMode: String = GITHUB_MODE_GIST,
     val githubGistId: String = "",
@@ -45,6 +45,8 @@ data class AppSettingsEntity(
     val googleDriveLastStatus: String = "Not connected"
 ) {
     companion object {
+        const val DEFAULT_UPDATE_REPO = "Itsparvaj/Priyo-Nots"
+
         const val THEME_SYSTEM = "SYSTEM"
         const val THEME_LIGHT = "LIGHT"
         const val THEME_DARK = "DARK"

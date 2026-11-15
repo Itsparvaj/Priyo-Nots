@@ -144,7 +144,7 @@ class PriyoNotsViewModel(application: Application) : AndroidViewModel(applicatio
         viewModelScope.launch {
             val s = repository.getSettings()
             val hasSource = when (s.updateSourceType) {
-                AppSettingsEntity.UPDATE_SOURCE_GITHUB -> s.githubReleaseRepo.isNotBlank()
+                AppSettingsEntity.UPDATE_SOURCE_GITHUB -> true
                 else -> s.updateEndpointUrl.isNotBlank()
             }
             if (s.updateCheckEnabled && hasSource) {
@@ -534,18 +534,11 @@ class PriyoNotsViewModel(application: Application) : AndroidViewModel(applicatio
         viewModelScope.launch {
             val currentSettings = repository.getSettings()
             val useGitHub = currentSettings.updateSourceType == AppSettingsEntity.UPDATE_SOURCE_GITHUB
-            if (useGitHub && currentSettings.githubReleaseRepo.isBlank()) {
-                if (!isAutomaticStartup) {
-                    _updateState.value = UpdateCheckUiState.Error(
-                        "Enter a GitHub repository (owner/repo) to check GitHub Releases."
-                    )
-                }
-                return@launch
-            }
+            val effectiveRepo = currentSettings.githubReleaseRepo.ifBlank { AppSettingsEntity.DEFAULT_UPDATE_REPO }
             if (!useGitHub && currentSettings.updateEndpointUrl.isBlank()) {
                 if (!isAutomaticStartup) {
                     _updateState.value = UpdateCheckUiState.Error(
-                        "No HTTPS update endpoint URL configured. Enter one in Settings or Update screen."
+                        "No HTTPS update endpoint URL configured. Switch to Official Releases or enter a custom URL."
                     )
                 }
                 return@launch
@@ -554,7 +547,7 @@ class PriyoNotsViewModel(application: Application) : AndroidViewModel(applicatio
                 _updateState.value = UpdateCheckUiState.Checking
             }
             val result = if (useGitHub) {
-                repository.checkForGitHubReleaseUpdate(currentSettings.githubReleaseRepo)
+                repository.checkForGitHubReleaseUpdate(effectiveRepo)
             } else {
                 repository.checkForUpdate(currentSettings.updateEndpointUrl)
             }

@@ -28,7 +28,7 @@ import kotlinx.coroutines.launch
         AppSettingsEntity::class,
         BackupHistoryEntity::class
     ],
-    version = 3,
+    version = 4,
     exportSchema = false
 )
 abstract class PriyoNotsDatabase : RoomDatabase() {
@@ -75,6 +75,17 @@ abstract class PriyoNotsDatabase : RoomDatabase() {
             }
         }
 
+        /**
+         * Safe non-destructive migration from v3 to v4 pre-populating the official Priyo Nots update repo.
+         */
+        val MIGRATION_3_4: Migration = object : Migration(3, 4) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL(
+                    "UPDATE app_settings SET githubReleaseRepo = 'Itsparvaj/Priyo-Nots' WHERE TRIM(githubReleaseRepo) = ''"
+                )
+            }
+        }
+
         fun getInstance(context: Context): PriyoNotsDatabase {
             return INSTANCE ?: synchronized(this) {
                 INSTANCE ?: buildDatabase(context.applicationContext).also { INSTANCE = it }
@@ -87,7 +98,7 @@ abstract class PriyoNotsDatabase : RoomDatabase() {
                 PriyoNotsDatabase::class.java,
                 DB_NAME
             )
-                .addMigrations(MIGRATION_1_2, MIGRATION_2_3)
+                .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4)
                 .addCallback(object : Callback() {
                     override fun onCreate(db: SupportSQLiteDatabase) {
                         super.onCreate(db)

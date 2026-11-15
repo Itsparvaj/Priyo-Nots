@@ -268,7 +268,7 @@ fun PrivacyPolicyScreen(onNavigateBack: () -> Unit) {
                 style = MaterialTheme.typography.bodyMedium
             )
             Text(
-                "4. Optional Network Use: Internet access is used solely if you configure an HTTPS update check endpoint and choose to check for or download application updates.",
+                "4. Optional Cloud Sync & App Updates: Internet access is used only when you connect your own Google Drive account for personal cloud backups or check for official Priyo Nots app updates.",
                 style = MaterialTheme.typography.bodyMedium
             )
             Text(
@@ -318,7 +318,7 @@ fun TermsScreen(onNavigateBack: () -> Unit) {
                 style = MaterialTheme.typography.bodyMedium
             )
             Text(
-                "4. Updates: When configuring an update endpoint URL, ensure you use a trusted HTTPS source.",
+                "4. Updates & Cloud Backups: App updates are verified by package signature before installation. Google Drive backups stay strictly inside your personal Drive account.",
                 style = MaterialTheme.typography.bodyMedium
             )
         }

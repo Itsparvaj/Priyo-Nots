@@ -244,4 +244,14 @@ class PriyoNotsDatabaseBackupTest {
         assertEquals("drv_1", parsedList.first().id)
         assertEquals(4096L, parsedList.first().sizeBytes)
     }
+
+    @Test
+    fun `default app settings preconfigure official update repository`() {
+        val defaults = com.example.data.local.entity.AppSettingsEntity()
+        assertEquals("Itsparvaj/Priyo-Nots", defaults.githubReleaseRepo)
+        assertEquals(
+            com.example.data.local.entity.AppSettingsEntity.UPDATE_SOURCE_GITHUB,
+            defaults.updateSourceType
+        )
+    }
 }
