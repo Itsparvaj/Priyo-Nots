@@ -254,4 +254,24 @@ class PriyoNotsDatabaseBackupTest {
             defaults.updateSourceType
         )
     }
+
+    @Test
+    fun `release v1_0_0 matching installed 1_0 does not falsely trigger self update`() {
+        val sameReleaseJson = """
+            {
+              "tag_name": "v1.0.0",
+              "name": "Priyo Nots v1.0.0",
+              "body": "Initial release",
+              "html_url": "https://github.com/Itsparvaj/Priyo-Nots/releases/tag/v1.0.0",
+              "assets": []
+            }
+        """.trimIndent()
+        val sameMeta = GitHubService.parseReleaseJson(sameReleaseJson)
+        assertFalse(sameMeta.isNewerThanInstalled)
+
+        val newerMeta = GitHubService.parseReleaseJson(
+            sameReleaseJson.replace("v1.0.0", "v1.1.0")
+        )
+        assertTrue(newerMeta.isNewerThanInstalled)
+    }
 }

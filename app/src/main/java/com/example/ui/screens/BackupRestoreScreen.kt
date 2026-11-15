@@ -12,6 +12,7 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.WindowInsets
@@ -34,6 +35,7 @@ import androidx.compose.material.icons.outlined.CheckCircle
 import androidx.compose.material.icons.outlined.CloudDone
 import androidx.compose.material.icons.outlined.CloudDownload
 import androidx.compose.material.icons.outlined.CloudUpload
+import androidx.compose.material.icons.outlined.ContentCopy
 import androidx.compose.material.icons.outlined.DriveFileMove
 import androidx.compose.material.icons.outlined.FolderOpen
 import androidx.compose.material.icons.outlined.History
@@ -75,8 +77,11 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.text.AnnotatedString
+import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.style.TextOverflow
@@ -84,6 +89,7 @@ import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.example.data.backup.BackupCrypto
 import com.example.data.backup.RestoreMode
+import com.example.data.drive.GoogleDriveAuthError
 import com.example.data.drive.GoogleDriveAuthHelper
 import com.example.ui.components.formatFileSize
 import com.example.ui.components.formatTimestamp
@@ -102,6 +108,7 @@ fun BackupRestoreScreen(
     onOpenHistory: () -> Unit
 ) {
     val context = LocalContext.current
+    val clipboard = LocalClipboardManager.current
     val scope = rememberCoroutineScope()
     val settings by viewModel.settings.collectAsStateWithLifecycle()
     val opState by viewModel.backupState.collectAsStateWithLifecycle()
@@ -122,6 +129,7 @@ fun BackupRestoreScreen(
     var driveAccessToken by remember { mutableStateOf<String?>(null) }
     var pendingDriveAction by remember { mutableStateOf<String?>(null) }
     var showDrivePickerDialog by remember { mutableStateOf(false) }
+    var driveSetupDialogError by remember { mutableStateOf<GoogleDriveAuthError?>(null) }
     val isDriveConnected = settings.googleDriveEmail.isNotBlank()
 
     val driveAuthLauncher = rememberLauncherForActivityResult(
@@ -150,7 +158,12 @@ fun BackupRestoreScreen(
                 }
             }
             .onFailure { err ->
-                viewModel.emitMessage(err.message ?: "Google Drive authorization failed")
+                val authErr = (err as? GoogleDriveAuthHelper.GoogleAuthFailureException)?.authError
+                if (authErr != null && authErr.isConsoleRegistrationIssue) {
+                    driveSetupDialogError = authErr
+                } else {
+                    viewModel.emitMessage(err.message ?: "Google Drive authorization failed")
+                }
             }
     }
 
@@ -202,9 +215,13 @@ fun BackupRestoreScreen(
                     }
                 }
             },
-            onError = { errMsg ->
+            onError = { authErr ->
                 pendingDriveAction = null
-                viewModel.emitMessage(errMsg)
+                if (authErr.isConsoleRegistrationIssue) {
+                    driveSetupDialogError = authErr
+                } else {
+                    viewModel.emitMessage(authErr.message)
+                }
             }
         )
     }
@@ -484,21 +501,23 @@ fun BackupRestoreScreen(
                         Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                             Button(
                                 onClick = { startGoogleDriveAction("BACKUP") },
+                                contentPadding = PaddingValues(horizontal = 12.dp, vertical = 10.dp),
                                 modifier = Modifier
                                     .weight(1f)
                                     .testTag("drive_backup_now_button")
                             ) {
-                                Icon(Icons.Outlined.CloudUpload, contentDescription = null)
+                                Icon(Icons.Outlined.CloudUpload, contentDescription = null, modifier = Modifier.size(18.dp))
                                 Spacer(modifier = Modifier.width(6.dp))
                                 Text("Back Up", maxLines = 1, softWrap = false)
                             }
                             OutlinedButton(
                                 onClick = { startGoogleDriveAction("RESTORE") },
+                                contentPadding = PaddingValues(horizontal = 12.dp, vertical = 10.dp),
                                 modifier = Modifier
                                     .weight(1f)
                                     .testTag("drive_restore_button")
                             ) {
-                                Icon(Icons.Outlined.CloudDownload, contentDescription = null)
+                                Icon(Icons.Outlined.CloudDownload, contentDescription = null, modifier = Modifier.size(18.dp))
                                 Spacer(modifier = Modifier.width(6.dp))
                                 Text("Restore", maxLines = 1, softWrap = false)
                             }
@@ -506,11 +525,12 @@ fun BackupRestoreScreen(
 
                         OutlinedButton(
                             onClick = { launchDriveOrDeviceCreatePicker() },
+                            contentPadding = PaddingValues(horizontal = 14.dp, vertical = 10.dp),
                             modifier = Modifier.fillMaxWidth()
                         ) {
                             Icon(Icons.Outlined.DriveFileMove, contentDescription = null, modifier = Modifier.size(18.dp))
                             Spacer(modifier = Modifier.width(8.dp))
-                            Text("Save via Drive Picker (No Sign-In Needed)", maxLines = 1, softWrap = false, overflow = TextOverflow.Ellipsis)
+                            Text("Save via Drive File Picker", maxLines = 1, softWrap = false)
                         }
                     }
                 }
@@ -596,13 +616,14 @@ fun BackupRestoreScreen(
                         Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                             Button(
                                 onClick = { launchDriveOrDeviceCreatePicker() },
+                                contentPadding = PaddingValues(horizontal = 12.dp, vertical = 10.dp),
                                 modifier = Modifier
                                     .weight(1f)
                                     .testTag("save_backup_to_device_button")
                             ) {
-                                Icon(Icons.Outlined.SaveAlt, contentDescription = null)
+                                Icon(Icons.Outlined.SaveAlt, contentDescription = null, modifier = Modifier.size(18.dp))
                                 Spacer(modifier = Modifier.width(6.dp))
-                                Text("Choose File", maxLines = 1, softWrap = false)
+                                Text("Export File", maxLines = 1, softWrap = false)
                             }
                             OutlinedButton(
                                 onClick = {
@@ -614,6 +635,7 @@ fun BackupRestoreScreen(
                                         if (encryptEnabled) backupPassword else null
                                     )
                                 },
+                                contentPadding = PaddingValues(horizontal = 12.dp, vertical = 10.dp),
                                 modifier = Modifier
                                     .weight(1f)
                                     .testTag("quick_local_backup_button")
@@ -685,14 +707,16 @@ fun BackupRestoreScreen(
                         Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                             OutlinedButton(
                                 onClick = { pickFolderLauncher.launch(null) },
+                                contentPadding = PaddingValues(horizontal = 12.dp, vertical = 10.dp),
                                 modifier = Modifier.weight(1f)
                             ) {
-                                Icon(Icons.Outlined.FolderOpen, contentDescription = null)
+                                Icon(Icons.Outlined.FolderOpen, contentDescription = null, modifier = Modifier.size(18.dp))
                                 Spacer(modifier = Modifier.width(6.dp))
                                 Text("Select Folder", maxLines = 1, softWrap = false)
                             }
                             OutlinedButton(
                                 onClick = { viewModel.runAutoBackupNow() },
+                                contentPadding = PaddingValues(horizontal = 12.dp, vertical = 10.dp),
                                 modifier = Modifier.weight(1f)
                             ) {
                                 Text("Run Now", maxLines = 1, softWrap = false)
@@ -919,6 +943,69 @@ fun BackupRestoreScreen(
             },
             confirmButton = {
                 TextButton(onClick = { showDrivePickerDialog = false }) { Text("Close") }
+            }
+        )
+    }
+
+    driveSetupDialogError?.let { setupErr ->
+        AlertDialog(
+            onDismissRequest = { driveSetupDialogError = null },
+            title = { Text("Save to Google Drive") },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                    Text(
+                        text = "Direct in-app Google Drive sync needs an Android OAuth Client ID registered in Google Cloud Console with Drive API enabled. Until then, you can still save directly to Google Drive via Android's Drive Picker below.",
+                        style = MaterialTheme.typography.bodySmall
+                    )
+                    if (!setupErr.appSha1.isNullOrBlank()) {
+                        Surface(
+                            shape = MaterialTheme.shapes.small,
+                            color = MaterialTheme.colorScheme.surfaceVariant
+                        ) {
+                            Column(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(10.dp),
+                                verticalArrangement = Arrangement.spacedBy(4.dp)
+                            ) {
+                                Text(
+                                    text = "Package: ${setupErr.packageName}",
+                                    style = MaterialTheme.typography.labelSmall,
+                                    fontFamily = FontFamily.Monospace
+                                )
+                                Text(
+                                    text = "APK SHA-1: ${setupErr.appSha1}",
+                                    style = MaterialTheme.typography.labelSmall,
+                                    fontFamily = FontFamily.Monospace
+                                )
+                            }
+                        }
+                        OutlinedButton(
+                            onClick = {
+                                clipboard.setText(AnnotatedString(setupErr.appSha1))
+                                viewModel.emitMessage("APK SHA-1 copied to clipboard")
+                            },
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Icon(Icons.Outlined.ContentCopy, contentDescription = null, modifier = Modifier.size(16.dp))
+                            Spacer(modifier = Modifier.width(6.dp))
+                            Text("Copy APK SHA-1", maxLines = 1, softWrap = false)
+                        }
+                    }
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { driveSetupDialogError = null }) { Text("Close") }
+            },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        driveSetupDialogError = null
+                        launchDriveOrDeviceCreatePicker()
+                    }
+                ) {
+                    Text("Open Drive Picker", maxLines = 1, softWrap = false)
+                }
             }
         )
     }

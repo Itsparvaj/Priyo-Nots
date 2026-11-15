@@ -17,6 +17,13 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import java.security.MessageDigest
 
+data class GoogleDriveAuthError(
+    val message: String,
+    val isConsoleRegistrationIssue: Boolean = false,
+    val appSha1: String? = null,
+    val packageName: String = ""
+)
+
 object GoogleDriveAuthHelper {
 
     private const val SCOPE_DRIVE_FILE = "https://www.googleapis.com/auth/drive.file"
@@ -31,16 +38,11 @@ object GoogleDriveAuthHelper {
         Scope(SCOPE_OPENID)
     )
 
-    /**
-     * Requests Google Drive OAuth2 authorization directly via Google Play Services AuthorizationClient.
-     * Avoids Credential Manager's pre-step which can fail or cancel prematurely on certain OEM devices
-     * and shows Google's standard account picker + Drive consent sheet reliably.
-     */
     fun connectAndAuthorize(
         activity: Activity,
         onNeedResolution: (IntentSenderRequest) -> Unit,
         onAuthorized: (accessToken: String, email: String?) -> Unit,
-        onError: (String) -> Unit
+        onError: (GoogleDriveAuthError) -> Unit
     ) {
         val authRequest = AuthorizationRequest.builder()
             .setRequestedScopes(driveScopes)
@@ -56,12 +58,18 @@ object GoogleDriveAuthHelper {
                             IntentSenderRequest.Builder(pendingIntent.intentSender).build()
                         )
                     } else {
-                        onError("Google Drive consent screen could not be opened on this device.")
+                        onError(
+                            GoogleDriveAuthError(
+                                "Google Drive consent screen could not be opened on this device."
+                            )
+                        )
                     }
                 } else {
                     val token = authResult.accessToken
                     if (token.isNullOrBlank()) {
-                        onError("Google Drive did not return an access token.")
+                        onError(
+                            GoogleDriveAuthError("Google Drive did not return an access token.")
+                        )
                     } else {
                         onAuthorized(token, null)
                     }
@@ -79,23 +87,33 @@ object GoogleDriveAuthHelper {
     ): Result<String> {
         if (resultCode == Activity.RESULT_CANCELED && data == null) {
             return Result.failure(
-                IllegalStateException(
-                    "Google Drive sign-in was cancelled or dismissed. You can still back up to Google Drive using 'Save via Drive Picker' below."
+                GoogleAuthFailureException(
+                    GoogleDriveAuthError(
+                        "Google Drive sign-in was cancelled. You can use 'Save via Drive Picker' to back up directly."
+                    )
                 )
             )
         }
-        return runCatching {
+        return try {
             val authResult = Identity.getAuthorizationClient(context)
                 .getAuthorizationResultFromIntent(data)
             val token = authResult.accessToken
             if (token.isNullOrBlank()) {
-                error("Google Drive permission was not granted.")
+                Result.failure(
+                    GoogleAuthFailureException(
+                        GoogleDriveAuthError("Google Drive permission was not granted.")
+                    )
+                )
+            } else {
+                Result.success(token)
             }
-            token
-        }.recoverCatching { throwable ->
-            throw IllegalStateException(describeAuthException(context, throwable))
+        } catch (throwable: Throwable) {
+            Result.failure(GoogleAuthFailureException(describeAuthException(context, throwable)))
         }
     }
+
+    class GoogleAuthFailureException(val authError: GoogleDriveAuthError) :
+        IllegalStateException(authError.message)
 
     suspend fun clearGoogleSession(context: Context) {
         withContext(Dispatchers.IO) {
@@ -135,21 +153,48 @@ object GoogleDriveAuthHelper {
         }.getOrNull()
     }
 
-    private fun describeAuthException(context: Context, throwable: Throwable): String {
-        return when (throwable) {
-            is ApiException -> when (throwable.statusCode) {
-                CommonStatusCodes.CANCELED ->
-                    "Google Drive sign-in was cancelled. If your device blocks in-app sign-in, use 'Save via Drive Picker' below."
-                CommonStatusCodes.NETWORK_ERROR ->
-                    "Network error while connecting to Google Drive. Check your internet connection."
-                CommonStatusCodes.DEVELOPER_ERROR -> {
-                    val sha1 = getSigningSha1(context) ?: "Unavailable"
-                    "Google Drive OAuth client mismatch (Error 10). Add this APK's SHA-1 ($sha1) for package '${context.packageName}' in Google Cloud Console, or use 'Save via Drive Picker' below."
+    private fun describeAuthException(context: Context, throwable: Throwable): GoogleDriveAuthError {
+        val rawMessage = throwable.localizedMessage.orEmpty()
+        val isUnregisteredMsg = rawMessage.contains("UNREGISTERED_ON_API_CONSOLE", ignoreCase = true)
+
+        if (throwable is ApiException) {
+            when (throwable.statusCode) {
+                CommonStatusCodes.CANCELED -> {
+                    return GoogleDriveAuthError(
+                        "Google Drive sign-in was cancelled. You can use 'Save via Drive File Picker' instead."
+                    )
                 }
-                else ->
-                    throwable.localizedMessage ?: "Google Drive sign-in error (${throwable.statusCode})"
+                CommonStatusCodes.NETWORK_ERROR -> {
+                    return GoogleDriveAuthError(
+                        "Network error while connecting to Google Drive. Check your internet connection."
+                    )
+                }
+                CommonStatusCodes.DEVELOPER_ERROR, CommonStatusCodes.INTERNAL_ERROR -> {
+                    if (throwable.statusCode == CommonStatusCodes.DEVELOPER_ERROR || isUnregisteredMsg) {
+                        val sha1 = getSigningSha1(context)
+                        return GoogleDriveAuthError(
+                            message = "In-app Google Drive OAuth needs this APK's SHA-1 registered under Cloud Console Android Clients & Drive API enabled.",
+                            isConsoleRegistrationIssue = true,
+                            appSha1 = sha1,
+                            packageName = context.packageName
+                        )
+                    }
+                }
             }
-            else -> throwable.localizedMessage ?: "Failed to authorize Google Drive"
         }
+
+        if (isUnregisteredMsg) {
+            val sha1 = getSigningSha1(context)
+            return GoogleDriveAuthError(
+                message = "In-app Google Drive OAuth needs this APK's SHA-1 registered under Cloud Console Android Clients & Drive API enabled.",
+                isConsoleRegistrationIssue = true,
+                appSha1 = sha1,
+                packageName = context.packageName
+            )
+        }
+
+        return GoogleDriveAuthError(
+            rawMessage.ifBlank { "Failed to connect to Google Drive." }
+        )
     }
 }

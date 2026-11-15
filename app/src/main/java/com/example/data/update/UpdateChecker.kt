@@ -28,13 +28,18 @@ data class UpdateMetadata(
     val downloadUrl: String,
     val releaseNotes: String,
     val forceUpdate: Boolean,
-    val sha256: String? = null
+    val sha256: String? = null,
+    val hasExplicitVersionCode: Boolean = true
 ) {
     val isNewerThanInstalled: Boolean
-        get() = com.example.data.github.GitHubService.compareSemanticVersions(
-            versionName,
-            BuildConfig.VERSION_NAME
-        ) > 0 || versionCode > BuildConfig.VERSION_CODE
+        get() {
+            val semVerCmp = com.example.data.github.GitHubService.compareSemanticVersions(
+                versionName,
+                BuildConfig.VERSION_NAME
+            )
+            if (semVerCmp != 0) return semVerCmp > 0
+            return hasExplicitVersionCode && versionCode > BuildConfig.VERSION_CODE
+        }
 
     val hasDirectApkAsset: Boolean
         get() = downloadUrl.endsWith(".apk", ignoreCase = true)

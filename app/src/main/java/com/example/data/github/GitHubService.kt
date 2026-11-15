@@ -74,16 +74,44 @@ object GitHubService {
     ): Result<UpdateMetadata?> = withContext(Dispatchers.IO) {
         val slug = normalizeRepoSlug(repoInput)
             ?: return@withContext Result.failure(
-                IllegalArgumentException("Invalid GitHub repository format. Use owner/repo (e.g., mohammadparvaj/priyo-nots).")
+                IllegalArgumentException("Invalid GitHub repository format. Use owner/repo (e.g., Itsparvaj/Priyo-Nots).")
             )
+        val cleanToken = optionalToken?.takeIf { it.isNotBlank() }
         runCatching {
-            val response = requestJson(
-                method = "GET",
-                urlStr = "$API_BASE/repos/$slug/releases/latest",
-                token = optionalToken?.takeIf { it.isNotBlank() },
-                bodyJson = null
-            )
-            parseReleaseJson(response)
+            try {
+                val response = requestJson(
+                    method = "GET",
+                    urlStr = "$API_BASE/repos/$slug/releases/latest",
+                    token = cleanToken,
+                    bodyJson = null
+                )
+                parseReleaseJson(response)
+            } catch (primaryErr: HttpStatusException) {
+                if (primaryErr.statusCode != 404) throw primaryErr
+                // /releases/latest returns 404 when there are no non-prerelease published releases yet,
+                // or when the repository is private. Probe /releases?per_page=1 to distinguish.
+                try {
+                    val listRaw = requestJson(
+                        method = "GET",
+                        urlStr = "$API_BASE/repos/$slug/releases?per_page=1",
+                        token = cleanToken,
+                        bodyJson = null
+                    )
+                    val arr = JSONArray(listRaw)
+                    if (arr.length() == 0) {
+                        null
+                    } else {
+                        parseReleaseJson(arr.getJSONObject(0).toString())
+                    }
+                } catch (listErr: HttpStatusException) {
+                    if (listErr.statusCode == 404) {
+                        throw IllegalStateException(
+                            "Release feed not found (404) for '$slug'. Ensure this GitHub repository is set to Public and has at least one published Release."
+                        )
+                    }
+                    throw listErr
+                }
+            }
         }
     }
 
@@ -120,14 +148,15 @@ object GitHubService {
             versionName = cleanVersion.ifBlank { tagName },
             updateTitle = releaseName,
             updateMessage = if (apkUrl.isNotBlank()) {
-                "New release $tagName is available on GitHub Releases."
+                "New release $tagName is available."
             } else {
-                "Release $tagName found on GitHub (no .apk asset attached; view release notes)."
+                "Release $tagName found (no .apk asset attached yet; view release page)."
             },
             downloadUrl = apkUrl.ifBlank { htmlUrl },
             releaseNotes = body,
             forceUpdate = forceUpdate,
-            sha256 = sha256
+            sha256 = sha256,
+            hasExplicitVersionCode = false
         )
     }
 
@@ -372,13 +401,18 @@ object GitHubService {
             val text = stream?.bufferedReader(Charsets.UTF_8)?.use { it.readText() }.orEmpty()
             if (code !in 200..299) {
                 val apiMsg = runCatching { JSONObject(text).optString("message") }.getOrNull()
-                throw IllegalStateException("GitHub API error ($code): ${apiMsg?.ifBlank { null } ?: text.take(160)}")
+                throw HttpStatusException(
+                    code,
+                    "GitHub API error ($code): ${apiMsg?.ifBlank { null } ?: text.take(160)}"
+                )
             }
             text
         } finally {
             conn.disconnect()
         }
     }
+
+    private class HttpStatusException(val statusCode: Int, message: String) : IllegalStateException(message)
 
     private fun requestRawUrl(urlStr: String, token: String?): String {
         val conn = (URL(urlStr).openConnection() as HttpURLConnection).apply {
