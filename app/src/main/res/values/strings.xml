@@ -1,0 +1,27 @@
+<resources>
+    <string name="app_name">Priyo Nots</string>
+    <string name="app_tagline">Your Personal Notes App</string>
+    <string name="owner_credit">By Mohammad Parvaj</string>
+    <string name="owner_name">Mohammad Parvaj</string>
+    <string name="nav_open_menu">Open navigation menu</string>
+    <string name="nav_back">Navigate back</string>
+    <string name="action_search">Search notes</string>
+    <string name="action_create_note">Create new note</string>
+    <string name="action_toggle_layout">Toggle grid or list view</string>
+    <string name="action_settings">Settings</string>
+    <string name="action_pin">Pin note</string>
+    <string name="action_unpin">Unpin note</string>
+    <string name="action_archive">Archive note</string>
+    <string name="action_restore">Restore note</string>
+    <string name="action_delete">Move to trash</string>
+    <string name="action_delete_forever">Delete permanently</string>
+    <string name="action_share">Share note</string>
+    <string name="action_copy">Copy note</string>
+    <string name="action_reminder">Set reminder</string>
+    <string name="reminder_channel_name">Note Reminders</string>
+    <string name="reminder_channel_desc">Scheduled local notifications for your Priyo Nots reminders</string>
+    <string name="update_channel_name">App Updates</string>
+    <string name="update_channel_desc">Notifications when a new Priyo Nots version is available</string>
+    <string name="backup_channel_name">Automatic Backups</string>
+    <string name="backup_channel_desc">Status alerts for automatic local backups</string>
+</resources>

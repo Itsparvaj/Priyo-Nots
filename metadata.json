@@ -1,0 +1,8 @@
+{
+  "name": "Priyo Nots",
+  "description": "Offline-first personal notes app by Mohammad Parvaj with Room SQLite storage, HTML5/JS rich-text editor, reminders, encrypted JSON backups, and configurable updates.",
+  "requestFramePermissions": [],
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
+}
