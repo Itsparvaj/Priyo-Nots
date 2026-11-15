@@ -9,6 +9,7 @@ import com.example.data.backup.BackupCrypto
 import com.example.data.backup.BackupJsonCodec
 import com.example.data.backup.BackupManager
 import com.example.data.backup.RestoreMode
+import com.example.data.drive.GoogleDriveService
 import com.example.data.github.GitHubService
 import com.example.data.local.PriyoNotsDatabase
 import com.example.data.local.entity.CategoriesEntity
@@ -200,5 +201,47 @@ class PriyoNotsDatabaseBackupTest {
         val summary = manager.restoreFromRawText(encrypted, RestoreMode.REPLACE, "CloudKey99")
         assertEquals(1, summary.notesAdded)
         assertEquals("Cloud Note", db.notesDao().getAllNotesRaw().first().title)
+    }
+
+    @Test
+    fun `google drive service parses files multipart and userinfo`() {
+        val email = GoogleDriveService.parseUserInfoEmail("""{"email":"bloggerparvaj30@gmail.com","name":"Mohammad Parvaj"}""")
+        assertEquals("bloggerparvaj30@gmail.com", email)
+
+        val multipart = GoogleDriveService.buildMultipartBody(
+            metadataJson = """{"name":"PriyoNots_Backup.json"}""",
+            contentText = """{"notes":[]}""",
+            boundary = "test_bound"
+        )
+        assertTrue(multipart.contains("--test_bound\r\n"))
+        assertTrue(multipart.contains("PriyoNots_Backup.json"))
+        assertTrue(multipart.endsWith("--test_bound--"))
+
+        val uploaded = GoogleDriveService.parseUploadedFileJson(
+            rawJson = """{"id":"file_99","name":"PriyoNots_Backup.pnbak","size":"2048","webViewLink":"https://drive.google.com/file/d/file_99/view"}""",
+            folderId = "folder_1",
+            fallbackName = "fallback.json",
+            fallbackSizeBytes = 100L
+        )
+        assertEquals("file_99", uploaded.fileId)
+        assertEquals(2048L, uploaded.sizeBytes)
+
+        val listJson = """
+            {
+              "files": [
+                {
+                  "id": "drv_1",
+                  "name": "PriyoNots_Backup_20261115.json",
+                  "size": "4096",
+                  "modifiedTime": "2026-11-15T08:00:00Z",
+                  "description": "Priyo Nots backup (12 notes)"
+                }
+              ]
+            }
+        """.trimIndent()
+        val parsedList = GoogleDriveService.parseFilesListJson(listJson)
+        assertEquals(1, parsedList.size)
+        assertEquals("drv_1", parsedList.first().id)
+        assertEquals(4096L, parsedList.first().sizeBytes)
     }
 }

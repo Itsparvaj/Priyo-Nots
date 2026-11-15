@@ -159,6 +159,7 @@ private fun PriyoNotsRootNav(
                     viewModel = viewModel,
                     onCreateNote = { navController.navigate(PriyoRoutes.ROUTE_CREATE_NOTE) },
                     onOpenNote = { id -> navController.navigate(PriyoRoutes.noteDetails(id)) },
+                    onEditNote = { id -> navController.navigate(PriyoRoutes.editNote(id)) },
                     onOpenSearch = { navController.navigate(PriyoRoutes.search()) },
                     onOpenCategories = { navController.navigate(PriyoRoutes.ROUTE_CATEGORIES) },
                     onOpenPinned = { navController.navigate(PriyoRoutes.ROUTE_PINNED) },
@@ -221,7 +222,8 @@ private fun PriyoNotsRootNav(
                     initialCategoryId = catId,
                     viewModel = viewModel,
                     onNavigateBack = { navController.popBackStack() },
-                    onOpenNote = { id -> navController.navigate(PriyoRoutes.noteDetails(id)) }
+                    onOpenNote = { id -> navController.navigate(PriyoRoutes.noteDetails(id)) },
+                    onEditNote = { id -> navController.navigate(PriyoRoutes.editNote(id)) }
                 )
             }
 
@@ -237,7 +239,8 @@ private fun PriyoNotsRootNav(
                 PinnedNotesScreen(
                     viewModel = viewModel,
                     onNavigateBack = { navController.popBackStack() },
-                    onOpenNote = { id -> navController.navigate(PriyoRoutes.noteDetails(id)) }
+                    onOpenNote = { id -> navController.navigate(PriyoRoutes.noteDetails(id)) },
+                    onEditNote = { id -> navController.navigate(PriyoRoutes.editNote(id)) }
                 )
             }
 
@@ -245,7 +248,8 @@ private fun PriyoNotsRootNav(
                 ArchivedNotesScreen(
                     viewModel = viewModel,
                     onNavigateBack = { navController.popBackStack() },
-                    onOpenNote = { id -> navController.navigate(PriyoRoutes.noteDetails(id)) }
+                    onOpenNote = { id -> navController.navigate(PriyoRoutes.noteDetails(id)) },
+                    onEditNote = { id -> navController.navigate(PriyoRoutes.editNote(id)) }
                 )
             }
 

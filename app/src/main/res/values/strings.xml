@@ -24,4 +24,5 @@
     <string name="update_channel_desc">Notifications when a new Priyo Nots version is available</string>
     <string name="backup_channel_name">Automatic Backups</string>
     <string name="backup_channel_desc">Status alerts for automatic local backups</string>
+    <string name="google_web_client_id" translatable="false">539675527153-4bhlur1l0q2g2ukchkqhfj2dff59u3lc.apps.googleusercontent.com</string>
 </resources>

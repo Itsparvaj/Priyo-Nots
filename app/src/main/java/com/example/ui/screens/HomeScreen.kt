@@ -89,7 +89,9 @@ import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.example.R
 import com.example.data.local.entity.AppSettingsEntity
+import com.example.data.local.model.NoteWithRelations
 import com.example.ui.components.NoteCardItem
+import com.example.ui.components.NoteQuickActionsSheet
 import com.example.ui.components.PriyoEmptyState
 import com.example.ui.components.formatShortDate
 import com.example.ui.viewmodel.PriyoNotsViewModel
@@ -102,6 +104,7 @@ fun HomeScreen(
     viewModel: PriyoNotsViewModel,
     onCreateNote: () -> Unit,
     onOpenNote: (Long) -> Unit,
+    onEditNote: (Long) -> Unit,
     onOpenSearch: () -> Unit,
     onOpenCategories: () -> Unit,
     onOpenPinned: () -> Unit,
@@ -124,6 +127,7 @@ fun HomeScreen(
     val drawerState = rememberDrawerState(DrawerValue.Closed)
     val scope = rememberCoroutineScope()
     var showSortMenu by remember { mutableStateOf(false) }
+    var longPressedNote by remember { mutableStateOf<NoteWithRelations?>(null) }
 
     val drawerContent: @Composable () -> Unit = {
         ModalDrawerSheet(modifier = Modifier.width(300.dp)) {
@@ -596,7 +600,8 @@ fun HomeScreen(
                                             NoteCardItem(
                                                 item = noteItem,
                                                 hidePreviews = settings.privacyModeHidePreviews,
-                                                onClick = { onOpenNote(noteItem.note.id) }
+                                                onClick = { onOpenNote(noteItem.note.id) },
+                                                onLongClick = { longPressedNote = noteItem }
                                             )
                                         }
                                     }
@@ -608,7 +613,8 @@ fun HomeScreen(
                                             NoteCardItem(
                                                 item = noteItem,
                                                 hidePreviews = settings.privacyModeHidePreviews,
-                                                onClick = { onOpenNote(noteItem.note.id) }
+                                                onClick = { onOpenNote(noteItem.note.id) },
+                                                onLongClick = { longPressedNote = noteItem }
                                             )
                                         }
                                     }
@@ -631,7 +637,8 @@ fun HomeScreen(
                                             NoteCardItem(
                                                 item = noteItem,
                                                 hidePreviews = settings.privacyModeHidePreviews,
-                                                onClick = { onOpenNote(noteItem.note.id) }
+                                                onClick = { onOpenNote(noteItem.note.id) },
+                                                onLongClick = { longPressedNote = noteItem }
                                             )
                                         }
                                     }
@@ -643,7 +650,8 @@ fun HomeScreen(
                                             NoteCardItem(
                                                 item = noteItem,
                                                 hidePreviews = settings.privacyModeHidePreviews,
-                                                onClick = { onOpenNote(noteItem.note.id) }
+                                                onClick = { onOpenNote(noteItem.note.id) },
+                                                onLongClick = { longPressedNote = noteItem }
                                             )
                                         }
                                     }
@@ -654,6 +662,18 @@ fun HomeScreen(
                 }
             }
         }
+    }
+
+    longPressedNote?.let { target ->
+        NoteQuickActionsSheet(
+            item = target,
+            onDismiss = { longPressedNote = null },
+            onEdit = { onEditNote(target.note.id) },
+            onTogglePin = { viewModel.togglePin(target.note.id, target.note.isPinned) },
+            onToggleArchive = { viewModel.toggleArchive(target.note.id, target.note.isArchived) },
+            onMoveToTrash = { viewModel.moveToTrash(target.note.id) },
+            onDeletePermanently = { viewModel.deletePermanently(target.note.id) }
+        )
     }
 }
 

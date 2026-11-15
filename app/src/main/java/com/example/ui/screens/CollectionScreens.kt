@@ -42,8 +42,14 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.unit.dp
+import androidx.compose.foundation.ExperimentalFoundationApi
+import androidx.compose.foundation.combinedClickable
+import androidx.compose.ui.hapticfeedback.HapticFeedbackType
+import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.example.data.local.model.NoteWithRelations
 import com.example.ui.components.NoteCardItem
+import com.example.ui.components.NoteQuickActionsSheet
 import com.example.ui.components.PriyoEmptyState
 import com.example.ui.components.formatTimestamp
 import com.example.ui.viewmodel.PriyoNotsViewModel
@@ -53,10 +59,12 @@ import com.example.ui.viewmodel.PriyoNotsViewModel
 fun PinnedNotesScreen(
     viewModel: PriyoNotsViewModel,
     onNavigateBack: () -> Unit,
-    onOpenNote: (Long) -> Unit
+    onOpenNote: (Long) -> Unit,
+    onEditNote: (Long) -> Unit
 ) {
     val notes by viewModel.pinnedNotes.collectAsStateWithLifecycle()
     val settings by viewModel.settings.collectAsStateWithLifecycle()
+    var longPressedNote by remember { mutableStateOf<NoteWithRelations?>(null) }
 
     Scaffold(
         contentWindowInsets = WindowInsets.safeDrawing,
@@ -88,11 +96,24 @@ fun PinnedNotesScreen(
                     NoteCardItem(
                         item = item,
                         hidePreviews = settings.privacyModeHidePreviews,
-                        onClick = { onOpenNote(item.note.id) }
+                        onClick = { onOpenNote(item.note.id) },
+                        onLongClick = { longPressedNote = item }
                     )
                 }
             }
         }
+    }
+
+    longPressedNote?.let { target ->
+        NoteQuickActionsSheet(
+            item = target,
+            onDismiss = { longPressedNote = null },
+            onEdit = { onEditNote(target.note.id) },
+            onTogglePin = { viewModel.togglePin(target.note.id, target.note.isPinned) },
+            onToggleArchive = { viewModel.toggleArchive(target.note.id, target.note.isArchived) },
+            onMoveToTrash = { viewModel.moveToTrash(target.note.id) },
+            onDeletePermanently = { viewModel.deletePermanently(target.note.id) }
+        )
     }
 }
 
@@ -101,10 +122,12 @@ fun PinnedNotesScreen(
 fun ArchivedNotesScreen(
     viewModel: PriyoNotsViewModel,
     onNavigateBack: () -> Unit,
-    onOpenNote: (Long) -> Unit
+    onOpenNote: (Long) -> Unit,
+    onEditNote: (Long) -> Unit
 ) {
     val notes by viewModel.archivedNotes.collectAsStateWithLifecycle()
     val settings by viewModel.settings.collectAsStateWithLifecycle()
+    var longPressedNote by remember { mutableStateOf<NoteWithRelations?>(null) }
 
     Scaffold(
         contentWindowInsets = WindowInsets.safeDrawing,
@@ -137,7 +160,8 @@ fun ArchivedNotesScreen(
                         NoteCardItem(
                             item = item,
                             hidePreviews = settings.privacyModeHidePreviews,
-                            onClick = { onOpenNote(item.note.id) }
+                            onClick = { onOpenNote(item.note.id) },
+                            onLongClick = { longPressedNote = item }
                         )
                         Row(
                             modifier = Modifier.fillMaxWidth().padding(top = 4.dp),
@@ -157,16 +181,30 @@ fun ArchivedNotesScreen(
             }
         }
     }
+
+    longPressedNote?.let { target ->
+        NoteQuickActionsSheet(
+            item = target,
+            onDismiss = { longPressedNote = null },
+            onEdit = { onEditNote(target.note.id) },
+            onTogglePin = { viewModel.togglePin(target.note.id, target.note.isPinned) },
+            onToggleArchive = { viewModel.toggleArchive(target.note.id, target.note.isArchived) },
+            onMoveToTrash = { viewModel.moveToTrash(target.note.id) },
+            onDeletePermanently = { viewModel.deletePermanently(target.note.id) }
+        )
+    }
 }
 
-@OptIn(ExperimentalMaterial3Api::class)
+@OptIn(ExperimentalMaterial3Api::class, ExperimentalFoundationApi::class)
 @Composable
 fun TrashScreen(
     viewModel: PriyoNotsViewModel,
     onNavigateBack: () -> Unit
 ) {
     val notes by viewModel.trashedNotes.collectAsStateWithLifecycle()
+    val haptic = LocalHapticFeedback.current
     var showEmptyConfirm by remember { mutableStateOf(false) }
+    var longPressedTrashNote by remember { mutableStateOf<NoteWithRelations?>(null) }
 
     Scaffold(
         contentWindowInsets = WindowInsets.safeDrawing,
@@ -205,7 +243,16 @@ fun TrashScreen(
                     Card(
                         shape = MaterialTheme.shapes.medium,
                         colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
-                        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant)
+                        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .combinedClickable(
+                                onClick = {},
+                                onLongClick = {
+                                    haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                                    longPressedTrashNote = item
+                                }
+                            )
                     ) {
                         Column(modifier = Modifier.padding(14.dp)) {
                             Text(
@@ -265,6 +312,30 @@ fun TrashScreen(
                     showEmptyConfirm = false
                 }) {
                     Text("Delete All", color = MaterialTheme.colorScheme.error)
+                }
+            }
+        )
+    }
+
+    longPressedTrashNote?.let { target ->
+        AlertDialog(
+            onDismissRequest = { longPressedTrashNote = null },
+            title = { Text(target.note.title.ifBlank { "Untitled Note" }) },
+            text = { Text("Choose an action for this trashed note.") },
+            dismissButton = {
+                TextButton(onClick = {
+                    viewModel.restoreFromTrash(target.note.id)
+                    longPressedTrashNote = null
+                }) {
+                    Text("Restore Note")
+                }
+            },
+            confirmButton = {
+                TextButton(onClick = {
+                    viewModel.deletePermanently(target.note.id)
+                    longPressedTrashNote = null
+                }) {
+                    Text("Delete Permanently", color = MaterialTheme.colorScheme.error)
                 }
             }
         )

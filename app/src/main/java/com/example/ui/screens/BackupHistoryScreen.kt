@@ -143,13 +143,21 @@ fun BackupHistoryScreen(
                                 Row {
                                     IconButton(onClick = {
                                         runCatching {
-                                            val uri = Uri.parse(record.fileUri)
-                                            val share = Intent(Intent.ACTION_SEND).apply {
-                                                type = "application/json"
-                                                putExtra(Intent.EXTRA_STREAM, uri)
-                                                addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                                            val share = if (record.fileUri.startsWith("https://")) {
+                                                Intent(Intent.ACTION_SEND).apply {
+                                                    type = "text/plain"
+                                                    putExtra(Intent.EXTRA_SUBJECT, record.fileName)
+                                                    putExtra(Intent.EXTRA_TEXT, record.fileUri)
+                                                }
+                                            } else {
+                                                val uri = Uri.parse(record.fileUri)
+                                                Intent(Intent.ACTION_SEND).apply {
+                                                    type = "application/json"
+                                                    putExtra(Intent.EXTRA_STREAM, uri)
+                                                    addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                                                }
                                             }
-                                            context.startActivity(Intent.createChooser(share, "Share Backup File"))
+                                            context.startActivity(Intent.createChooser(share, "Share Backup"))
                                         }.onFailure {
                                             viewModel.emitMessage("Backup file is no longer accessible")
                                         }

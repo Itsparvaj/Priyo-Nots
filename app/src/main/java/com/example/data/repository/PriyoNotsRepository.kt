@@ -7,6 +7,10 @@ import com.example.data.backup.BackupManager
 import com.example.data.backup.BackupResult
 import com.example.data.backup.RestoreMode
 import com.example.data.backup.RestoreSummary
+import com.example.data.drive.GoogleDriveAuthHelper
+import com.example.data.drive.GoogleDriveFileSummary
+import com.example.data.drive.GoogleDriveService
+import com.example.data.drive.GoogleDriveUploadResult
 import com.example.data.github.GitHubCloudBackupResult
 import com.example.data.github.GitHubGistSummary
 import com.example.data.github.GitHubService
@@ -401,6 +405,80 @@ class PriyoNotsRepository(
         password: String?,
         onProgress: (Float, String) -> Unit
     ): RestoreSummary = backupManager.restoreFromRawText(rawText, mode, password, onProgress)
+
+    suspend fun saveGoogleDriveConnected(accessToken: String, knownEmail: String?): String {
+        val resolvedEmail = knownEmail?.takeIf { it.isNotBlank() }
+            ?: GoogleDriveService.fetchUserInfoEmail(accessToken).getOrDefault("Google Account")
+        updateSettings {
+            it.copy(
+                googleDriveEmail = resolvedEmail,
+                googleDriveLastStatus = "Connected as $resolvedEmail"
+            )
+        }
+        return resolvedEmail
+    }
+
+    suspend fun disconnectGoogleDrive() {
+        GoogleDriveAuthHelper.clearGoogleSession(context)
+        updateSettings {
+            it.copy(
+                googleDriveEmail = "",
+                googleDriveFolderId = "",
+                googleDriveLastStatus = "Not connected"
+            )
+        }
+    }
+
+    suspend fun backupToGoogleDrive(
+        accessToken: String,
+        knownEmail: String?,
+        password: String?
+    ): Result<GoogleDriveUploadResult> {
+        val email = saveGoogleDriveConnected(accessToken, knownEmail)
+        val settings = getSettings()
+        val (payload, counts) = backupManager.createBackupPayload(password)
+        val isEncrypted = !password.isNullOrBlank()
+        val ext = if (isEncrypted) "pnbak" else "json"
+        val stamp = java.text.SimpleDateFormat("yyyyMMdd_HHmmss", java.util.Locale.US)
+            .format(java.util.Date())
+        val fileName = "PriyoNots_Backup_$stamp.$ext"
+
+        val res = GoogleDriveService.uploadBackup(
+            accessToken = accessToken,
+            existingFolderId = settings.googleDriveFolderId,
+            fileName = fileName,
+            content = payload,
+            noteCount = counts.first,
+            isEncrypted = isEncrypted
+        )
+        res.onSuccess { uploaded ->
+            val now = System.currentTimeMillis()
+            updateSettings {
+                it.copy(
+                    googleDriveEmail = email,
+                    googleDriveFolderId = uploaded.folderId,
+                    googleDriveLastBackupAt = now,
+                    googleDriveLastStatus = "Synced (${counts.first} notes)"
+                )
+            }
+            backupManager.recordExternalBackupSuccess(
+                fileName = uploaded.fileName,
+                fileUri = uploaded.webViewLink,
+                sizeBytes = uploaded.sizeBytes,
+                counts = counts,
+                isEncrypted = isEncrypted,
+                backupType = BackupHistoryEntity.TYPE_GOOGLE_DRIVE,
+                locationLabel = "Google Drive (Priyo Nots Backups)"
+            )
+        }
+        return res
+    }
+
+    suspend fun listGoogleDriveBackups(accessToken: String): Result<List<GoogleDriveFileSummary>> =
+        GoogleDriveService.listBackups(accessToken)
+
+    suspend fun fetchGoogleDriveBackupRaw(accessToken: String, fileId: String): Result<String> =
+        GoogleDriveService.downloadBackupContent(accessToken, fileId)
 
     fun downloadUpdateApk(metadata: UpdateMetadata): Flow<DownloadState> =
         updateChecker.downloadAndVerifyApk(metadata)

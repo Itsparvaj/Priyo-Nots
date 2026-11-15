@@ -29,5 +29,6 @@ data class BackupHistoryEntity(
         const val TYPE_EXPORT = "EXPORT"
         const val TYPE_GITHUB_GIST = "GITHUB_GIST"
         const val TYPE_GITHUB_REPO = "GITHUB_REPO"
+        const val TYPE_GOOGLE_DRIVE = "GOOGLE_DRIVE"
     }
 }

@@ -37,7 +37,12 @@ data class AppSettingsEntity(
     val githubRepoBranch: String = "main",
     val githubRepoFilePath: String = "backups/priyo_nots_backup.json",
     val githubLastBackupAt: Long? = null,
-    val githubLastStatus: String = "Not connected"
+    val githubLastStatus: String = "Not connected",
+    // Google Drive integration fields (added in DB v3)
+    val googleDriveEmail: String = "",
+    val googleDriveFolderId: String = "",
+    val googleDriveLastBackupAt: Long? = null,
+    val googleDriveLastStatus: String = "Not connected"
 ) {
     companion object {
         const val THEME_SYSTEM = "SYSTEM"

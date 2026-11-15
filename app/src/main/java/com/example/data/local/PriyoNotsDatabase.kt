@@ -28,7 +28,7 @@ import kotlinx.coroutines.launch
         AppSettingsEntity::class,
         BackupHistoryEntity::class
     ],
-    version = 2,
+    version = 3,
     exportSchema = false
 )
 abstract class PriyoNotsDatabase : RoomDatabase() {
@@ -63,6 +63,18 @@ abstract class PriyoNotsDatabase : RoomDatabase() {
             }
         }
 
+        /**
+         * Safe non-destructive migration from v2 to v3 adding Google Drive backup settings columns.
+         */
+        val MIGRATION_2_3: Migration = object : Migration(2, 3) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("ALTER TABLE app_settings ADD COLUMN googleDriveEmail TEXT NOT NULL DEFAULT ''")
+                db.execSQL("ALTER TABLE app_settings ADD COLUMN googleDriveFolderId TEXT NOT NULL DEFAULT ''")
+                db.execSQL("ALTER TABLE app_settings ADD COLUMN googleDriveLastBackupAt INTEGER")
+                db.execSQL("ALTER TABLE app_settings ADD COLUMN googleDriveLastStatus TEXT NOT NULL DEFAULT 'Not connected'")
+            }
+        }
+
         fun getInstance(context: Context): PriyoNotsDatabase {
             return INSTANCE ?: synchronized(this) {
                 INSTANCE ?: buildDatabase(context.applicationContext).also { INSTANCE = it }
@@ -75,7 +87,7 @@ abstract class PriyoNotsDatabase : RoomDatabase() {
                 PriyoNotsDatabase::class.java,
                 DB_NAME
             )
-                .addMigrations(MIGRATION_1_2)
+                .addMigrations(MIGRATION_1_2, MIGRATION_2_3)
                 .addCallback(object : Callback() {
                     override fun onCreate(db: SupportSQLiteDatabase) {
                         super.onCreate(db)

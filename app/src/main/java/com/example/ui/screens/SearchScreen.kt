@@ -32,11 +32,16 @@ import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.example.data.local.model.NoteWithRelations
 import com.example.ui.components.NoteCardItem
+import com.example.ui.components.NoteQuickActionsSheet
 import com.example.ui.components.PriyoEmptyState
 import com.example.ui.viewmodel.PriyoNotsViewModel
 
@@ -46,7 +51,8 @@ fun SearchScreen(
     initialCategoryId: Long?,
     viewModel: PriyoNotsViewModel,
     onNavigateBack: () -> Unit,
-    onOpenNote: (Long) -> Unit
+    onOpenNote: (Long) -> Unit,
+    onEditNote: (Long) -> Unit
 ) {
     val query by viewModel.searchQuery.collectAsStateWithLifecycle()
     val selectedCategoryId by viewModel.searchCategoryId.collectAsStateWithLifecycle()
@@ -54,6 +60,7 @@ fun SearchScreen(
     val results by viewModel.searchResults.collectAsStateWithLifecycle()
     val categories by viewModel.categories.collectAsStateWithLifecycle()
     val settings by viewModel.settings.collectAsStateWithLifecycle()
+    var longPressedNote by remember { mutableStateOf<NoteWithRelations?>(null) }
 
     LaunchedEffect(initialCategoryId) {
         if (initialCategoryId != null) {
@@ -157,11 +164,24 @@ fun SearchScreen(
                         NoteCardItem(
                             item = item,
                             hidePreviews = settings.privacyModeHidePreviews,
-                            onClick = { onOpenNote(item.note.id) }
+                            onClick = { onOpenNote(item.note.id) },
+                            onLongClick = { longPressedNote = item }
                         )
                     }
                 }
             }
         }
+    }
+
+    longPressedNote?.let { target ->
+        NoteQuickActionsSheet(
+            item = target,
+            onDismiss = { longPressedNote = null },
+            onEdit = { onEditNote(target.note.id) },
+            onTogglePin = { viewModel.togglePin(target.note.id, target.note.isPinned) },
+            onToggleArchive = { viewModel.toggleArchive(target.note.id, target.note.isArchived) },
+            onMoveToTrash = { viewModel.moveToTrash(target.note.id) },
+            onDeletePermanently = { viewModel.deletePermanently(target.note.id) }
+        )
     }
 }

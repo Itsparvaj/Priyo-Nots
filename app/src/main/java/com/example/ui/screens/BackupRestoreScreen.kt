@@ -1,5 +1,8 @@
 package com.example.ui.screens
 
+import android.app.Activity
+import android.content.Context
+import android.content.ContextWrapper
 import android.content.Intent
 import android.net.Uri
 import androidx.activity.compose.rememberLauncherForActivityResult
@@ -21,6 +24,7 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.outlined.Backup
+import androidx.compose.material.icons.outlined.CloudDone
 import androidx.compose.material.icons.outlined.CloudDownload
 import androidx.compose.material.icons.outlined.CloudUpload
 import androidx.compose.material.icons.outlined.FolderOpen
@@ -67,6 +71,7 @@ import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.example.data.backup.BackupCrypto
 import com.example.data.backup.RestoreMode
+import com.example.data.drive.GoogleDriveAuthHelper
 import com.example.data.local.entity.AppSettingsEntity
 import com.example.ui.components.formatFileSize
 import com.example.ui.components.formatTimestamp
@@ -90,6 +95,8 @@ fun BackupRestoreScreen(
     val opState by viewModel.backupState.collectAsStateWithLifecycle()
     val githubGists by viewModel.githubGists.collectAsStateWithLifecycle()
     val githubBusy by viewModel.githubBusy.collectAsStateWithLifecycle()
+    val driveFiles by viewModel.driveFiles.collectAsStateWithLifecycle()
+    val driveBusy by viewModel.driveBusy.collectAsStateWithLifecycle()
 
     var encryptEnabled by remember { mutableStateOf(false) }
     var backupPassword by remember { mutableStateOf("") }
@@ -101,6 +108,12 @@ fun BackupRestoreScreen(
     var restorePassword by remember { mutableStateOf("") }
     var restoreMode by remember { mutableStateOf(RestoreMode.MERGE) }
 
+    // Google Drive state
+    var driveAccessToken by remember { mutableStateOf<String?>(null) }
+    var pendingDriveAction by remember { mutableStateOf<String?>(null) }
+    var showDrivePickerDialog by remember { mutableStateOf(false) }
+    val isDriveConnected = settings.googleDriveEmail.isNotBlank()
+
     // GitHub Cloud config state
     var showGitHubTokenDialog by remember { mutableStateOf(false) }
     var showGistPickerDialog by remember { mutableStateOf(false) }
@@ -110,6 +123,74 @@ fun BackupRestoreScreen(
     var repoPathInput by remember(settings.githubRepoFilePath) { mutableStateOf(settings.githubRepoFilePath) }
     val isGitHubConnected = settings.githubUsername.isNotBlank() && viewModel.hasGitHubToken()
     val isGistMode = settings.githubBackupMode != AppSettingsEntity.GITHUB_MODE_REPO
+
+    val driveAuthLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.StartIntentSenderForResult()
+    ) { activityResult ->
+        val action = pendingDriveAction
+        pendingDriveAction = null
+        GoogleDriveAuthHelper.extractTokenFromConsentResult(context, activityResult.data)
+            .onSuccess { token ->
+                driveAccessToken = token
+                viewModel.onGoogleDriveAuthorized(token, null)
+                when (action) {
+                    "BACKUP" -> viewModel.backupToGoogleDrive(
+                        accessToken = token,
+                        knownEmail = null,
+                        password = if (encryptEnabled) backupPassword else null
+                    )
+                    "RESTORE" -> {
+                        viewModel.refreshGoogleDriveBackups(token)
+                        showDrivePickerDialog = true
+                    }
+                }
+            }
+            .onFailure { err ->
+                viewModel.emitMessage(err.message ?: "Google Drive authorization failed")
+            }
+    }
+
+    fun startGoogleDriveAction(action: String, forceAccountPicker: Boolean = false) {
+        if (action == "BACKUP" && encryptEnabled && backupPassword.isBlank()) {
+            viewModel.emitMessage("Enter a password for encrypted backup")
+            return
+        }
+        val activity = context.findActivity()
+        if (activity == null) {
+            viewModel.emitMessage("Unable to open Google account picker from this context.")
+            return
+        }
+        pendingDriveAction = action
+        scope.launch {
+            GoogleDriveAuthHelper.connectAndAuthorize(
+                activity = activity,
+                promptAccountSelection = forceAccountPicker,
+                onNeedResolution = { intentSenderReq ->
+                    driveAuthLauncher.launch(intentSenderReq)
+                },
+                onAuthorized = { token, email ->
+                    pendingDriveAction = null
+                    driveAccessToken = token
+                    viewModel.onGoogleDriveAuthorized(token, email)
+                    when (action) {
+                        "BACKUP" -> viewModel.backupToGoogleDrive(
+                            accessToken = token,
+                            knownEmail = email,
+                            password = if (encryptEnabled) backupPassword else null
+                        )
+                        "RESTORE" -> {
+                            viewModel.refreshGoogleDriveBackups(token)
+                            showDrivePickerDialog = true
+                        }
+                    }
+                },
+                onError = { errMsg ->
+                    pendingDriveAction = null
+                    viewModel.emitMessage(errMsg)
+                }
+            )
+        }
+    }
 
     val createBackupDocLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.CreateDocument("application/json")
@@ -444,6 +525,102 @@ fun BackupRestoreScreen(
                         Icon(Icons.Outlined.History, contentDescription = null)
                         Spacer(modifier = Modifier.width(6.dp))
                         Text("View Backup History")
+                    }
+                }
+            }
+
+            // Google Drive Cloud Backup Card
+            Card(
+                shape = MaterialTheme.shapes.medium,
+                border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant)
+            ) {
+                Column(
+                    modifier = Modifier.padding(16.dp),
+                    verticalArrangement = Arrangement.spacedBy(10.dp)
+                ) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.weight(1f)) {
+                            Icon(
+                                imageVector = if (isDriveConnected) Icons.Outlined.CloudDone else Icons.Outlined.CloudUpload,
+                                contentDescription = null,
+                                tint = MaterialTheme.colorScheme.primary
+                            )
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Column {
+                                Text("Google Drive Backup", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
+                                Text(
+                                    text = if (isDriveConnected) "Connected as ${settings.googleDriveEmail}" else "Not connected",
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = if (isDriveConnected) MaterialTheme.colorScheme.tertiary else MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                            }
+                        }
+                        if (isDriveConnected) {
+                            TextButton(onClick = {
+                                driveAccessToken = null
+                                viewModel.disconnectGoogleDrive()
+                            }) {
+                                Text("Disconnect", color = MaterialTheme.colorScheme.error)
+                            }
+                        } else {
+                            OutlinedButton(
+                                onClick = { startGoogleDriveAction("CONNECT", forceAccountPicker = true) },
+                                modifier = Modifier.testTag("connect_google_drive_button")
+                            ) {
+                                Icon(Icons.Outlined.CloudUpload, contentDescription = null)
+                                Spacer(modifier = Modifier.width(6.dp))
+                                Text("Connect")
+                            }
+                        }
+                    }
+
+                    Text(
+                        text = "Back up and restore notes directly to your Google Drive 'Priyo Nots Backups' folder. Works with AES-256 encryption when enabled above.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+
+                    settings.googleDriveLastBackupAt?.let { syncedAt ->
+                        Text(
+                            text = "Last Drive backup: ${formatTimestamp(syncedAt)} · ${settings.googleDriveLastStatus}",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.primary
+                        )
+                    }
+
+                    if (driveBusy) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            CircularProgressIndicator()
+                            Spacer(modifier = Modifier.width(10.dp))
+                            Text("Connecting to Google Drive...", style = MaterialTheme.typography.bodySmall)
+                        }
+                    }
+
+                    Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                        Button(
+                            onClick = {
+                                startGoogleDriveAction("BACKUP", forceAccountPicker = !isDriveConnected)
+                            },
+                            modifier = Modifier.weight(1f).testTag("drive_backup_now_button")
+                        ) {
+                            Icon(Icons.Outlined.CloudUpload, contentDescription = null)
+                            Spacer(modifier = Modifier.width(6.dp))
+                            Text("Backup")
+                        }
+                        OutlinedButton(
+                            onClick = {
+                                startGoogleDriveAction("RESTORE", forceAccountPicker = !isDriveConnected)
+                            },
+                            modifier = Modifier.weight(1f).testTag("drive_restore_button")
+                        ) {
+                            Icon(Icons.Outlined.CloudDownload, contentDescription = null)
+                            Spacer(modifier = Modifier.width(6.dp))
+                            Text("Restore")
+                        }
                     }
                 }
             }
@@ -789,4 +966,75 @@ fun BackupRestoreScreen(
             }
         )
     }
+
+    if (showDrivePickerDialog) {
+        AlertDialog(
+            onDismissRequest = { showDrivePickerDialog = false },
+            title = { Text("Select Google Drive Backup") },
+            text = {
+                if (driveBusy) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        CircularProgressIndicator()
+                        Spacer(modifier = Modifier.width(10.dp))
+                        Text("Loading backups from Google Drive...")
+                    }
+                } else if (driveFiles.isEmpty()) {
+                    Text("No Priyo Nots backup files were found in your Google Drive 'Priyo Nots Backups' folder yet.")
+                } else {
+                    Column(
+                        modifier = Modifier.verticalScroll(rememberScrollState()),
+                        verticalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        driveFiles.forEach { file ->
+                            Card(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .clickable {
+                                        val token = driveAccessToken
+                                        if (token.isNullOrBlank()) {
+                                            viewModel.emitMessage("Google Drive session expired. Tap Restore again.")
+                                            showDrivePickerDialog = false
+                                            return@clickable
+                                        }
+                                        showDrivePickerDialog = false
+                                        scope.launch {
+                                            viewModel.fetchGoogleDriveBackupRaw(token, file.id)
+                                                .onSuccess { raw ->
+                                                    restoreRequiresPassword = BackupCrypto.isEncryptedEnvelope(raw)
+                                                    restorePassword = ""
+                                                    pendingCloudRestoreText = raw
+                                                }
+                                                .onFailure { err ->
+                                                    viewModel.emitMessage(err.message ?: "Failed to download from Google Drive")
+                                                }
+                                        }
+                                    },
+                                border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant)
+                            ) {
+                                Column(modifier = Modifier.padding(12.dp)) {
+                                    Text(file.name, style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.SemiBold)
+                                    if (file.description.isNotBlank()) {
+                                        Text(file.description, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                    }
+                                    Text(
+                                        "${formatFileSize(file.sizeBytes)} · ${file.modifiedTimeIso.take(10)}",
+                                        style = MaterialTheme.typography.labelSmall
+                                    )
+                                }
+                            }
+                        }
+                    }
+                }
+            },
+            confirmButton = {
+                TextButton(onClick = { showDrivePickerDialog = false }) { Text("Close") }
+            }
+        )
+    }
+}
+
+private tailrec fun Context.findActivity(): Activity? = when (this) {
+    is Activity -> this
+    is ContextWrapper -> baseContext.findActivity()
+    else -> null
 }

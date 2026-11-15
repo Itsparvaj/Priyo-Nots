@@ -10,6 +10,7 @@ import com.example.data.backup.AutoBackupScheduler
 import com.example.data.backup.BackupResult
 import com.example.data.backup.RestoreMode
 import com.example.data.backup.RestoreSummary
+import com.example.data.drive.GoogleDriveFileSummary
 import com.example.data.github.GitHubGistSummary
 import com.example.data.local.dao.ReminderWithNoteTitle
 import com.example.data.local.entity.AppSettingsEntity
@@ -131,6 +132,12 @@ class PriyoNotsViewModel(application: Application) : AndroidViewModel(applicatio
 
     private val _githubBusy = MutableStateFlow(false)
     val githubBusy: StateFlow<Boolean> = _githubBusy.asStateFlow()
+
+    private val _driveFiles = MutableStateFlow<List<GoogleDriveFileSummary>>(emptyList())
+    val driveFiles: StateFlow<List<GoogleDriveFileSummary>> = _driveFiles.asStateFlow()
+
+    private val _driveBusy = MutableStateFlow(false)
+    val driveBusy: StateFlow<Boolean> = _driveBusy.asStateFlow()
 
     init {
         // Automatic update check on launch if configured and enabled
@@ -461,7 +468,7 @@ class PriyoNotsViewModel(application: Application) : AndroidViewModel(applicatio
 
     fun restoreFromRawText(rawText: String, mode: RestoreMode, password: String?) {
         viewModelScope.launch {
-            _backupState.value = BackupOperationState.InProgress(0.15f, "Validating GitHub backup...")
+            _backupState.value = BackupOperationState.InProgress(0.15f, "Validating cloud backup...")
             runCatching {
                 repository.restoreFromRawBackupText(rawText, mode, password) { progress, msg ->
                     _backupState.value = BackupOperationState.InProgress(progress, msg)
@@ -469,10 +476,59 @@ class PriyoNotsViewModel(application: Application) : AndroidViewModel(applicatio
             }.onSuccess { summary ->
                 _backupState.value = BackupOperationState.RestoreDone(summary)
             }.onFailure { err ->
-                _backupState.value = BackupOperationState.Error(err.message ?: "GitHub restore failed")
+                _backupState.value = BackupOperationState.Error(err.message ?: "Cloud restore failed")
             }
         }
     }
+
+    fun onGoogleDriveAuthorized(accessToken: String, knownEmail: String?) {
+        viewModelScope.launch {
+            _driveBusy.value = true
+            runCatching {
+                repository.saveGoogleDriveConnected(accessToken, knownEmail)
+            }.onSuccess { email ->
+                emitMessage("Google Drive connected as $email")
+            }.onFailure { err ->
+                emitMessage(err.message ?: "Connected to Google Drive")
+            }
+            _driveBusy.value = false
+        }
+    }
+
+    fun disconnectGoogleDrive() {
+        viewModelScope.launch {
+            repository.disconnectGoogleDrive()
+            _driveFiles.value = emptyList()
+            emitMessage("Google Drive disconnected")
+        }
+    }
+
+    fun backupToGoogleDrive(accessToken: String, knownEmail: String?, password: String?) {
+        viewModelScope.launch {
+            _backupState.value = BackupOperationState.InProgress(0.4f, "Uploading backup to Google Drive...")
+            repository.backupToGoogleDrive(accessToken, knownEmail, password)
+                .onSuccess { uploaded ->
+                    _backupState.value = BackupOperationState.Idle
+                    emitMessage("Uploaded ${uploaded.fileName} to Google Drive")
+                }
+                .onFailure { err ->
+                    _backupState.value = BackupOperationState.Error(err.message ?: "Google Drive backup failed")
+                }
+        }
+    }
+
+    fun refreshGoogleDriveBackups(accessToken: String) {
+        viewModelScope.launch {
+            _driveBusy.value = true
+            repository.listGoogleDriveBackups(accessToken)
+                .onSuccess { files -> _driveFiles.value = files }
+                .onFailure { err -> emitMessage(err.message ?: "Failed to list Google Drive backups") }
+            _driveBusy.value = false
+        }
+    }
+
+    suspend fun fetchGoogleDriveBackupRaw(accessToken: String, fileId: String): Result<String> =
+        repository.fetchGoogleDriveBackupRaw(accessToken, fileId)
 
     fun checkForUpdates(isAutomaticStartup: Boolean = false) {
         viewModelScope.launch {
